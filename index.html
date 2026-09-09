@@ -1,0 +1,1641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FDC Inventory</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  if(typeof tailwind !== 'undefined'){
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'] },
+        colors: {
+          brand: { 50:'#eef2ff',100:'#e0e7ff',200:'#c7d2fe',300:'#a5b4fc',400:'#818cf8',500:'#6366f1',600:'#4f46e5',700:'#4338ca',800:'#3730a3',900:'#312e81' }
+        }
+      }
+    }
+  }
+  }
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  body{ font-family:'Inter', ui-sans-serif, system-ui, sans-serif; }
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  .num{ font-variant-numeric: tabular-nums; }
+  .bar-fill{ transition: width .5s ease; }
+  @media print{
+    .no-print{ display:none !important; }
+    body{ background:#fff; }
+  }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased">
+
+<div class="min-h-screen flex" id="app-root">
+
+  <!-- Mobile top bar -->
+  <header class="lg:hidden fixed top-0 inset-x-0 h-14 bg-slate-900 text-white flex items-center justify-between px-4 z-30">
+    <button onclick="toggleSidebar(true)" class="p-2 -ml-2 rounded hover:bg-slate-800">
+      <svg width="24" height="24" class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <div class="font-extrabold tracking-tight text-[15px]">FDC Inventory</div>
+    <div class="w-6"></div>
+  </header>
+
+  <!-- Sidebar backdrop (mobile) -->
+  <div id="sidebar-backdrop" onclick="toggleSidebar(false)" class="fixed inset-0 bg-slate-900/50 z-30 hidden lg:hidden"></div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 w-64 bg-slate-900 text-slate-200 flex flex-col z-40 -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-out">
+    <div class="px-6 py-6 border-b border-white/10">
+      <div class="text-lg font-extrabold tracking-tight text-white">FDC Inventory</div>
+    </div>
+    <nav id="nav-list" class="flex-1 px-3 py-4 space-y-1 overflow-y-auto"></nav>
+    <div id="sidebar-foot" class="px-5 py-4 border-t border-white/10"></div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 min-w-0 pt-14 lg:pt-0">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-6 lg:py-9" id="main-inner"></div>
+  </main>
+</div>
+
+<!-- Sign-in screen (shown only when cloud sync requires a signed-in user) -->
+<div id="auth-screen" class="hidden min-h-screen items-center justify-center bg-slate-100 p-6">
+  <div class="w-full max-w-sm bg-white rounded-xl shadow-2xl border border-slate-200 p-7">
+    <div class="text-center mb-6">
+      <div class="text-lg font-extrabold tracking-tight text-slate-900">FDC Inventory</div>
+      <div class="text-xs text-slate-500 mt-1">Individual sign-in, shared database</div>
+    </div>
+    <div class="flex border border-slate-200 rounded-lg p-1 mb-5 bg-slate-50" id="auth-tabs"></div>
+    <div id="auth-body"></div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal-overlay" class="fixed inset-0 bg-slate-900/50 z-50 hidden items-start justify-center overflow-y-auto p-4 sm:p-6">
+  <div id="modal-box" class="modal-box-el bg-white rounded-xl shadow-2xl w-full max-w-lg mt-4 sm:mt-10 mb-10">
+    <div class="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-200">
+      <h3 id="modal-title" class="text-lg font-bold text-slate-900"></h3>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none px-1">&times;</button>
+    </div>
+    <div id="modal-body" class="px-5 sm:px-6 py-5"></div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div id="toast-wrap" class="fixed bottom-5 right-5 z-[60] flex flex-col gap-2 items-end"></div>
+
+<script>
+/* =====================================================================
+   STATE
+===================================================================== */
+const state = { products: [], movements: [], profiles: [] };
+const LOCATIONS = [
+  { id:'loc-ho',  name:'Head Office',  code:'HO',  color:'#6366f1' },
+  { id:'loc-apt', name:'Apollo Tower', code:'APT', color:'#10b981' },
+  { id:'loc-t15', name:'T-15',         code:'T15', color:'#f59e0b' },
+  { id:'loc-t13', name:'T-13',         code:'T13', color:'#ec4899' },
+];
+function getLocation(id){ return LOCATIONS.find(l=>l.id===id); }
+
+const ui = {
+  tab: 'dashboard',
+  productsFilter: { search:'', category:'' },
+  movementsFilter: { search:'', type:'', locationId:'', dateFrom:'', dateTo:'' },
+  sidebarOpen: false,
+};
+
+/* =====================================================================
+   STORAGE — saved to this browser's localStorage, so it works fully
+   standalone: as a local file, or hosted on your own website.
+   Data lives only in the browser/device you're using — it won't sync
+   to other devices or follow you if you switch browsers.
+===================================================================== */
+const STORAGE_PREFIX = 'fdc_inventory_';
+
+function hasStorageApi(){
+  try{
+    const testKey = STORAGE_PREFIX + '__test__';
+    window.localStorage.setItem(testKey, '1');
+    window.localStorage.removeItem(testKey);
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+async function getJSON(key, fallback){
+  if(!hasStorageApi()){ markStorageDown('missing'); return fallback; }
+  try{
+    const raw = window.localStorage.getItem(STORAGE_PREFIX + key);
+    markStorageUp();
+    return raw ? JSON.parse(raw) : fallback;
+  }catch(e){
+    return fallback; // missing or corrupt value is treated as empty
+  }
+}
+async function setJSON(key, value){
+  if(!hasStorageApi()){ markStorageDown('missing'); return false; }
+  try{
+    window.localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+    markStorageUp();
+    return true;
+  }catch(e){
+    // Most commonly a full/disabled storage quota (e.g. private browsing)
+    markStorageDown('error');
+    return false;
+  }
+}
+async function persistItemDoc(item){
+  await setJSON('products', state.products);
+  if(firestoreItemsRef){
+    try{ await firestoreItemsRef.doc(item.id).set(item); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function deleteItemDoc(id){
+  await setJSON('products', state.products);
+  if(firestoreItemsRef){
+    try{ await firestoreItemsRef.doc(id).delete(); }
+    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function persistMovementDoc(m){
+  await setJSON('movements', state.movements);
+  if(firestoreMovementsRef){
+    try{ await firestoreMovementsRef.doc(m.id).set(m); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function deleteMovementDoc(id){
+  await setJSON('movements', state.movements);
+  if(firestoreMovementsRef){
+    try{ await firestoreMovementsRef.doc(id).delete(); }
+    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+  }
+}
+
+let storageDown = false;
+function markStorageDown(reason){
+  const wasDown = storageDown;
+  storageDown = true;
+  renderStorageBanner(reason);
+  if(!wasDown) toast('Changes are not being saved — see the notice at the top of the page.', true);
+}
+function markStorageUp(){
+  if(storageDown){ storageDown = false; toast('Saving is working again.'); }
+  const el = document.getElementById('storage-banner');
+  if(el) el.remove();
+  document.body.classList.remove('has-banner');
+}
+function renderStorageBanner(reason){
+  document.body.classList.add('has-banner');
+  let el = document.getElementById('storage-banner');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'storage-banner';
+    el.className = 'fixed top-0 inset-x-0 z-[70] bg-rose-600 text-white text-[13px] px-4 py-2.5 flex flex-wrap items-center justify-center gap-3 text-center';
+    document.body.prepend(el);
+  }
+  const msg = reason === 'missing'
+    ? "Your browser is blocking local storage here (common in private/incognito windows, or with strict cookie settings). Allow site data for this page, or open it in a normal browser window."
+    : "Your browser couldn't save that change — storage may be full or disabled. Try clearing space or checking your browser's privacy settings.";
+  el.innerHTML = '<span><b class="font-bold">Not saving.</b> ' + msg + '</span>' +
+    '<button class="bg-white/20 hover:bg-white/30 rounded px-2.5 py-1 text-xs font-semibold shrink-0" onclick="this.parentElement.remove(); document.body.classList.remove(\'has-banner\');">Dismiss</button>';
+}
+
+/* =====================================================================
+   CLOUD SYNC — optional. Off by default (data stays local-only, no
+   sign-in). Once connected to a Firebase project, each person signs in
+   with their own account, and their inventory syncs across their own
+   devices. Data is private per account — it is never shared between
+   different people's accounts.
+   We never see or store anyone's credentials — the config and session
+   live only in the browser, managed by Firebase itself.
+===================================================================== */
+const CLOUD_CONFIG_KEY = STORAGE_PREFIX + 'cloud_config';
+const REQUIRED_EMAIL_DOMAIN = 'fdc.mv';
+function isAllowedEmail(email){
+  return (email||'').trim().toLowerCase().endsWith('@' + REQUIRED_EMAIL_DOMAIN);
+}
+let firestoreDb = null;
+let firestoreItemsRef = null;
+let firestoreMovementsRef = null;
+let firestoreProfilesRef = null;
+let firebaseAuth = null;
+let itemsUnsub = null;
+let movementsUnsub = null;
+let profileUnsub = null;
+let allProfilesUnsub = null;
+let pendingSignupExtra = null;
+let cloudStatus = 'local'; // 'local' | 'connecting' | 'synced' | 'error'
+let authUser = null; // { uid, email, name } | null
+const authUi = { mode: 'login' };
+
+function initials(name){
+  const parts = (name||'').trim().split(/\s+/).filter(Boolean);
+  if(parts.length===0) return '?';
+  return (parts[0][0] + (parts[1]?parts[1][0]:'')).toUpperCase();
+}
+
+function getCloudConfig(){
+  try{ const raw = localStorage.getItem(CLOUD_CONFIG_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
+}
+function setCloudConfig(cfg){
+  if(cfg) localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cfg));
+  else localStorage.removeItem(CLOUD_CONFIG_KEY);
+}
+
+function loadScriptOnce(src){
+  return new Promise((resolve, reject)=>{
+    if(document.querySelector('script[data-src="'+src+'"]')){ resolve(true); return; }
+    const s = document.createElement('script');
+    s.src = src; s.async = true; s.setAttribute('data-src', src);
+    s.onload = ()=>resolve(true);
+    s.onerror = ()=>reject(new Error('Could not load the cloud sync library. Check your connection.'));
+    document.head.appendChild(s);
+  });
+}
+async function ensureFirebase(){
+  if(window.firebase && window.firebase.firestore && window.firebase.auth) return true;
+  await loadScriptOnce('https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js');
+  await loadScriptOnce('https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js');
+  await loadScriptOnce('https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js');
+  if(!window.firebase) throw new Error('Cloud sync library did not load.');
+  return true;
+}
+
+function parseFirebaseConfigInput(text){
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if(start===-1 || end===-1 || end<start) throw new Error('Paste the full Firebase config object, including the { }.');
+  const objText = text.slice(start, end+1);
+  let obj;
+  try{ obj = JSON.parse(objText); }
+  catch(e){
+    try{ obj = Function('"use strict"; return (' + objText + ');')(); }
+    catch(e2){ throw new Error('Could not read that config. Paste it exactly as copied from Firebase.'); }
+  }
+  if(!obj || !obj.apiKey || !obj.projectId) throw new Error('That config is missing apiKey or projectId — copy the whole object from Firebase.');
+  return obj;
+}
+
+function clearLocalDataCache(){
+  state.products = [];
+  state.movements = [];
+  localStorage.removeItem(STORAGE_PREFIX+'products');
+  localStorage.removeItem(STORAGE_PREFIX+'movements');
+}
+
+async function initCloudIfConfigured(){
+  const cfg = getCloudConfig();
+  if(!cfg){ cloudStatus = 'local'; authUser = null; renderApp(); return; }
+  cloudStatus = 'connecting';
+  renderApp();
+  try{
+    await ensureFirebase();
+    if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(cfg.firebaseConfig);
+    firestoreDb = firebase.firestore();
+    firestoreProfilesRef = firestoreDb.collection('fdc_inventory_profiles');
+    firebaseAuth = firebase.auth();
+    firebaseAuth.onAuthStateChanged(user=>{
+      if(user){
+        const pendingExtra = pendingSignupExtra; pendingSignupExtra = null;
+        authUser = {
+          uid:user.uid, email:user.email,
+          name: (pendingExtra && pendingExtra.name) || user.displayName || user.email,
+          role:'member',
+          designation: (pendingExtra && pendingExtra.designation) || '',
+          department: (pendingExtra && pendingExtra.department) || '',
+        };
+        cloudStatus = 'synced';
+        firestoreItemsRef = firestoreDb.collection('fdc_inventory_items');
+        firestoreMovementsRef = firestoreDb.collection('fdc_inventory_movements');
+        listenToCloudItems();
+        listenToCloudMovements();
+        ensureOwnProfileDoc(user, pendingExtra);
+        listenToOwnProfile(user);
+      } else {
+        authUser = null;
+        if(itemsUnsub){ itemsUnsub(); itemsUnsub = null; }
+        if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
+        if(profileUnsub){ profileUnsub(); profileUnsub = null; }
+        if(allProfilesUnsub){ allProfilesUnsub(); allProfilesUnsub = null; }
+        state.profiles = [];
+        firestoreItemsRef = null; firestoreMovementsRef = null;
+        clearLocalDataCache();
+        cloudStatus = 'synced';
+      }
+      renderApp();
+    });
+  }catch(e){
+    cloudStatus = 'error';
+    toast('Could not connect to cloud sync: ' + (e && e.message ? e.message : 'unknown error'), true);
+    renderApp();
+  }
+}
+function listenToOwnProfile(user){
+  if(profileUnsub) profileUnsub();
+  if(!firestoreProfilesRef) return;
+  profileUnsub = firestoreProfilesRef.doc(user.uid).onSnapshot(doc=>{
+    if(doc.exists && authUser){
+      const d = doc.data();
+      authUser.role = d.role || 'member';
+      authUser.designation = d.designation || '';
+      authUser.department = d.department || '';
+      authUser.name = d.name || authUser.name;
+    }
+    renderApp();
+  }, err=>{ /* profile is a nice-to-have on top of auth; a failure here shouldn't block the app */ });
+}
+async function ensureOwnProfileDoc(user, extra){
+  if(!firestoreProfilesRef) return;
+  try{
+    const snap = await firestoreProfilesRef.doc(user.uid).get();
+    if(!snap.exists){
+      const countSnap = await firestoreProfilesRef.limit(1).get();
+      const role = countSnap.empty ? 'admin' : 'member';
+      const data = Object.assign({ uid:user.uid, email:user.email, name:user.displayName||user.email, role, designation:'', department:'', createdAt: Date.now() }, extra||{});
+      await firestoreProfilesRef.doc(user.uid).set(data);
+      if(authUser && authUser.uid===user.uid){ authUser.role = role; renderApp(); } // reflect immediately, don't wait on the snapshot round-trip
+    }
+  }catch(e){ /* profile creation failing shouldn't block sign-in */ }
+}
+function listenToCloudItems(){
+  if(itemsUnsub) itemsUnsub();
+  itemsUnsub = firestoreItemsRef.onSnapshot(snap=>{
+    cloudStatus = 'synced';
+    state.products = snap.docs.map(d=>d.data());
+    localStorage.setItem(STORAGE_PREFIX+'products', JSON.stringify(state.products));
+    renderApp();
+  }, err=>{
+    cloudStatus = 'error';
+    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
+    renderApp();
+  });
+}
+function listenToCloudMovements(){
+  if(movementsUnsub) movementsUnsub();
+  movementsUnsub = firestoreMovementsRef.onSnapshot(snap=>{
+    state.movements = snap.docs.map(d=>d.data());
+    localStorage.setItem(STORAGE_PREFIX+'movements', JSON.stringify(state.movements));
+    renderApp();
+  }, err=>{
+    cloudStatus = 'error';
+    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
+    renderApp();
+  });
+}
+function disconnectCloud(){
+  confirmAction('Disconnect cloud sync? Your data will stay saved in this browser only from now on.', async ()=>{
+    setCloudConfig(null);
+    if(itemsUnsub){ itemsUnsub(); itemsUnsub = null; }
+    if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
+    if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
+    closeModal();
+    toast('Cloud sync disconnected.');
+    renderApp();
+  });
+}
+
+/* ---------- Sign-in / sign-up screen ---------- */
+function friendlyAuthError(e){
+  const code = (e && e.code) || '';
+  if(code.includes('email-already-in-use')) return 'An account with this email already exists — sign in instead.';
+  if(code.includes('invalid-email')) return 'Enter a valid email address.';
+  if(code.includes('weak-password')) return 'Password must be at least 6 characters.';
+  if(code.includes('user-not-found') || code.includes('wrong-password') || code.includes('invalid-credential')) return 'Incorrect email or password.';
+  if(code.includes('network-request-failed')) return 'Network error — check your connection and try again.';
+  if(code.includes('operation-not-allowed')) return 'Email/Password sign-in isn’t turned on for this Firebase project yet. In the Firebase console, go to Authentication → Sign-in method and enable Email/Password.';
+  if(code.includes('configuration-not-found')) return 'Authentication hasn’t been set up for this Firebase project yet. In the Firebase console, go to Authentication and click "Get started" first, then enable Email/Password under Sign-in method.';
+  return (e && e.message) || 'Something went wrong. Please try again.';
+}
+function renderAuthScreen(){
+  const tabsEl = document.getElementById('auth-tabs');
+  const bodyEl = document.getElementById('auth-body');
+  if(!tabsEl || !bodyEl) return;
+  if(cloudStatus==='connecting'){
+    tabsEl.innerHTML = '';
+    bodyEl.innerHTML = `<div class="text-center text-sm text-slate-500 py-8">Connecting…</div>`;
+    return;
+  }
+  tabsEl.innerHTML = `
+    <button onclick="authUi.mode='login'; renderAuthScreen();" class="flex-1 py-2 rounded-md text-sm font-semibold ${authUi.mode==='login'?'bg-white shadow text-slate-900':'text-slate-500'}">Sign in</button>
+    <button onclick="authUi.mode='register'; renderAuthScreen();" class="flex-1 py-2 rounded-md text-sm font-semibold ${authUi.mode==='register'?'bg-white shadow text-slate-900':'text-slate-500'}">Create account</button>
+  `;
+  const footNote = `<div class="text-center text-[11px] text-slate-400 mt-4">Work email required (${esc(REQUIRED_EMAIL_DOMAIN)})  ·  one shared cloud database.</div>`;
+  if(authUi.mode==='login'){
+    bodyEl.innerHTML = `
+      <div id="auth-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+      <div class="mb-3">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Work email</label>
+        <input type="email" id="auth-email" placeholder="user@${esc(REQUIRED_EMAIL_DOMAIN)}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div class="mb-4">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Password</label>
+        <input type="password" id="auth-password" placeholder="••••••••" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <button onclick="submitSignIn()" class="w-full py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Sign in</button>
+      ${footNote}
+    `;
+  } else {
+    bodyEl.innerHTML = `
+      <div id="auth-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+      <div class="mb-3">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Your name</label>
+        <input type="text" id="auth-name" placeholder="Jordan Lee" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div class="mb-3">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Work email</label>
+        <input type="email" id="auth-email" placeholder="user@${esc(REQUIRED_EMAIL_DOMAIN)}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Designation</label>
+          <input type="text" id="auth-designation" placeholder="e.g. Store Officer" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
+          <input type="text" id="auth-department" placeholder="e.g. Operations" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+      </div>
+      <div class="mb-4">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Password</label>
+        <input type="password" id="auth-password" placeholder="At least 6 characters" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <button onclick="submitSignUp()" class="w-full py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Create account</button>
+      ${footNote}
+    `;
+  }
+}
+async function submitSignIn(){
+  const errEl = document.getElementById('auth-error');
+  errEl.classList.add('hidden');
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  if(!email || !password){ errEl.textContent='Enter your email and password.'; errEl.classList.remove('hidden'); return; }
+  if(!isAllowedEmail(email)){ errEl.textContent='Use your work email (ends with @' + REQUIRED_EMAIL_DOMAIN + ').'; errEl.classList.remove('hidden'); return; }
+  try{
+    await firebaseAuth.signInWithEmailAndPassword(email, password);
+  }catch(e){
+    errEl.textContent = friendlyAuthError(e); errEl.classList.remove('hidden');
+  }
+}
+async function submitSignUp(){
+  const errEl = document.getElementById('auth-error');
+  errEl.classList.add('hidden');
+  const name = document.getElementById('auth-name').value.trim();
+  const email = document.getElementById('auth-email').value.trim();
+  const designation = document.getElementById('auth-designation').value.trim();
+  const department = document.getElementById('auth-department').value.trim();
+  const password = document.getElementById('auth-password').value;
+  if(!name){ errEl.textContent='Enter your name.'; errEl.classList.remove('hidden'); return; }
+  if(!email || !password){ errEl.textContent='Enter your email and password.'; errEl.classList.remove('hidden'); return; }
+  if(!isAllowedEmail(email)){ errEl.textContent='Use your work email (ends with @' + REQUIRED_EMAIL_DOMAIN + ').'; errEl.classList.remove('hidden'); return; }
+  if(!designation){ errEl.textContent='Enter your designation.'; errEl.classList.remove('hidden'); return; }
+  if(!department){ errEl.textContent='Enter your department.'; errEl.classList.remove('hidden'); return; }
+  try{
+    pendingSignupExtra = { name, designation, department };
+    const cred = await firebaseAuth.createUserWithEmailAndPassword(email, password);
+    await cred.user.updateProfile({ displayName: name });
+  }catch(e){
+    pendingSignupExtra = null;
+    errEl.textContent = friendlyAuthError(e); errEl.classList.remove('hidden');
+  }
+}
+function signOutUser(){
+  confirmAction('Sign out?', async ()=>{
+    closeModal();
+    try{ await firebaseAuth.signOut(); }catch(e){}
+  });
+}
+
+function renderSidebarFoot(){
+  const foot = document.getElementById('sidebar-foot');
+  if(!foot) return;
+  const cfg = getCloudConfig();
+  if(!cfg){
+    foot.innerHTML = `
+      <div class="text-[11px] text-slate-400 leading-relaxed mb-2.5">Saved in this browser only.</div>
+      <button onclick="openCloudSyncModal()" class="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-[12.5px] font-semibold bg-brand-600 text-white hover:bg-brand-700">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 10.5a3 3 0 100-6 3 3 0 000 6zM4 16.5c0-3 2.7-5 6-5s6 2 6 5"/></svg>
+        Enable cloud sync
+      </button>`;
+    return;
+  }
+  if(cloudStatus==='connecting'){
+    foot.innerHTML = `<div class="text-[11px] text-slate-400">Connecting to cloud sync…</div>`;
+    return;
+  }
+  if(cloudStatus==='error'){
+    foot.innerHTML = `
+      <div class="flex items-center gap-1.5 text-[11px] text-amber-400 font-semibold mb-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Cloud sync error</div>
+      <button onclick="openCloudSyncModal()" class="text-[11px] text-slate-400 hover:text-white">Manage</button>`;
+    return;
+  }
+  if(authUser){
+    foot.innerHTML = `
+      <button onclick="openProfileModal()" class="flex items-center gap-2.5 mb-2.5 w-full text-left hover:opacity-80">
+        <div class="w-7 h-7 rounded-full bg-brand-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">${esc(initials(authUser.name))}</div>
+        <div class="min-w-0">
+          <div class="text-[12px] font-semibold text-white truncate">${esc(authUser.name)}</div>
+          <div class="text-[10.5px] text-slate-400 truncate">${esc(authUser.email)}</div>
+        </div>
+      </button>
+      <div class="flex items-center gap-3">
+        <button onclick="openCloudSyncModal()" class="text-[11px] text-slate-400 hover:text-white">Manage</button>
+        <button onclick="signOutUser()" class="text-[11px] text-slate-400 hover:text-white">Sign out</button>
+      </div>`;
+  } else {
+    foot.innerHTML = `
+      <div class="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold mb-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Synced to cloud</div>
+      <button onclick="openCloudSyncModal()" class="text-[11px] text-slate-400 hover:text-white">Manage</button>`;
+  }
+}
+
+/* ---------- My Profile ---------- */
+function openProfileModal(){
+  if(!authUser) return;
+  const body = `
+    <div id="profile-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="flex items-center gap-3 mb-5">
+      <div class="w-12 h-12 rounded-full bg-brand-600 text-white text-base font-bold flex items-center justify-center shrink-0">${esc(initials(authUser.name))}</div>
+      <div class="min-w-0">
+        <div class="text-sm font-bold text-slate-900 truncate">${esc(authUser.name)}</div>
+        <div class="text-xs text-slate-500 truncate">${esc(authUser.email)}</div>
+        <div class="text-[11px] text-slate-400 truncate capitalize">${esc(authUser.role||'member')}</div>
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Display name</label>
+      <input type="text" id="prof-name" value="${esc(authUser.name)}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="grid grid-cols-2 gap-3 mb-2">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Designation</label>
+        <input type="text" id="prof-designation" value="${esc(authUser.designation||'')}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
+        <input type="text" id="prof-department" value="${esc(authUser.department||'')}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="flex justify-end mb-5">
+      <button onclick="saveProfileName()" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Save profile</button>
+    </div>
+    <div class="border-t border-slate-200 pt-4">
+      <div class="text-xs font-semibold text-slate-600 mb-2.5">Change password</div>
+      <div class="mb-2.5">
+        <input type="password" id="prof-current-pw" placeholder="Current password" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div class="grid grid-cols-2 gap-3 mb-2.5">
+        <input type="password" id="prof-new-pw" placeholder="New password" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <input type="password" id="prof-new-pw2" placeholder="Confirm new password" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <button onclick="changeOwnPassword()" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Update password</button>
+        <button onclick="sendPasswordReset()" class="text-[12px] font-semibold text-slate-500 hover:text-slate-700">Email me a reset link instead</button>
+      </div>
+    </div>
+  `;
+  openModal('My Profile', body);
+}
+async function saveProfileName(){
+  const errEl = document.getElementById('profile-error');
+  errEl.classList.add('hidden');
+  const name = document.getElementById('prof-name').value.trim();
+  const designation = document.getElementById('prof-designation').value.trim();
+  const department = document.getElementById('prof-department').value.trim();
+  if(!name){ errEl.textContent='Enter a name.'; errEl.classList.remove('hidden'); return; }
+  try{
+    const user = firebaseAuth.currentUser;
+    await user.updateProfile({ displayName: name });
+    if(firestoreProfilesRef) await firestoreProfilesRef.doc(authUser.uid).set({ name, designation, department }, { merge:true });
+    authUser.name = name; authUser.designation = designation; authUser.department = department;
+    closeModal();
+    toast('Profile updated.');
+    renderApp();
+  }catch(e){
+    errEl.textContent = friendlyAuthError(e); errEl.classList.remove('hidden');
+  }
+}
+async function changeOwnPassword(){
+  const errEl = document.getElementById('profile-error');
+  errEl.classList.add('hidden');
+  const current = document.getElementById('prof-current-pw').value;
+  const next = document.getElementById('prof-new-pw').value;
+  const next2 = document.getElementById('prof-new-pw2').value;
+  if(!current || !next){ errEl.textContent='Enter your current and new password.'; errEl.classList.remove('hidden'); return; }
+  if(next.length < 6){ errEl.textContent='New password must be at least 6 characters.'; errEl.classList.remove('hidden'); return; }
+  if(next !== next2){ errEl.textContent='New passwords do not match.'; errEl.classList.remove('hidden'); return; }
+  try{
+    const user = firebaseAuth.currentUser;
+    const cred = firebase.auth.EmailAuthProvider.credential(authUser.email, current);
+    await user.reauthenticateWithCredential(cred);
+    await user.updatePassword(next);
+    closeModal();
+    toast('Password updated.');
+  }catch(e){
+    errEl.textContent = friendlyAuthError(e); errEl.classList.remove('hidden');
+  }
+}
+async function sendPasswordReset(){
+  try{
+    await firebaseAuth.sendPasswordResetEmail(authUser.email);
+    toast('Password reset email sent to ' + authUser.email + '.');
+  }catch(e){
+    toast(friendlyAuthError(e), true);
+  }
+}
+
+function openCloudSyncModal(){
+  const cfg = getCloudConfig();
+  const body = `
+    <div id="cloud-form-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="bg-brand-50 text-brand-800 text-xs rounded-lg px-3.5 py-3 mb-4 leading-relaxed">
+      Each person signs in with their own individual login (name, email, password), and every login connects to the same one cloud database — so whatever anyone enters, everyone sees. This uses a free Firebase project (Google) — no credit card required.
+      <ol class="list-decimal ml-4 mt-1.5 space-y-0.5">
+        <li>Go to <a href="https://console.firebase.google.com" target="_blank" rel="noopener" class="underline font-semibold">console.firebase.google.com</a> and create a project</li>
+        <li>Build → Firestore Database → Create database</li>
+        <li>Build → Authentication → Get started → Sign-in method → enable <b>Email/Password</b></li>
+        <li>Project settings (gear icon) → General → Your apps → Add app → Web</li>
+        <li>Copy the <code>firebaseConfig</code> object shown and paste it below</li>
+      </ol>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Firebase config</label>
+      <textarea id="cf-config" rows="6" placeholder='{ apiKey: "...", projectId: "...", ... }' class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${cfg?esc(JSON.stringify(cfg.firebaseConfig,null,2)):''}</textarea>
+      <div class="text-[11px] text-slate-400 mt-1.5">Give this same config to anyone else who should use this database — they'll paste it in and create their own individual login, separate from yours.</div>
+    </div>
+    <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-2 leading-relaxed">
+      Only share this config with people you trust with your inventory data. In the Firebase console, under Firestore Database → Rules, set <code>allow read, write: if request.auth != null;</code> so only signed-in logins can access it.
+    </div>
+    <div class="flex justify-between gap-2.5 mt-5">
+      ${cfg ? `<button class="px-4 py-2 rounded-lg text-sm font-semibold border border-rose-200 text-rose-600 hover:bg-rose-50" onclick="disconnectCloud()">Disconnect</button>` : '<span></span>'}
+      <div class="flex gap-2.5">
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveCloudConfig()">${cfg?'Save changes':'Connect'}</button>
+      </div>
+    </div>
+  `;
+  openModal(cfg?'Manage cloud sync':'Enable cloud sync', body, true);
+}
+async function saveCloudConfig(){
+  const errEl = document.getElementById('cloud-form-error');
+  errEl.classList.add('hidden');
+  try{
+    const firebaseConfig = parseFirebaseConfigInput(document.getElementById('cf-config').value);
+    setCloudConfig({ firebaseConfig });
+    closeModal();
+    toast('Connecting…');
+    if(itemsUnsub){ itemsUnsub(); itemsUnsub = null; }
+    if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firebaseAuth = null; authUser = null;
+    await initCloudIfConfigured();
+  }catch(e){
+    errEl.textContent = e.message; errEl.classList.remove('hidden');
+  }
+}
+
+/* =====================================================================
+   UTILITIES
+===================================================================== */
+function uid(){ return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,9); }
+function nowISO(){ return new Date().toISOString(); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtDate(d){
+  if(!d) return '—';
+  const dt = new Date(d + 'T00:00:00');
+  if(isNaN(dt)) return d;
+  return dt.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
+}
+function fmtNum(n){ return (Number(n)||0).toLocaleString(undefined, { maximumFractionDigits:2 }); }
+function byName(a,b){ return (a.name||'').localeCompare(b.name||''); }
+function getProduct(id){ return state.products.find(p=>p.id===id); }
+function distinctCategories(){
+  return [...new Set(state.products.map(p=>(p.category||'').trim()).filter(Boolean))].sort();
+}
+function toast(msg, isError){
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = 'px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium text-white max-w-xs ' + (isError ? 'bg-rose-600' : 'bg-slate-900');
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(), 300); }, 3000);
+}
+
+/* =====================================================================
+   NAVIGATION
+===================================================================== */
+const ICONS = {
+  dashboard:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1"/><rect x="11" y="11" width="6.5" height="6.5" rx="1"/></svg>',
+  products:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 6.2 10 2.5l7.5 3.7v7.6L10 17.5l-7.5-3.7z"/><path d="M2.5 6.2 10 9.9l7.5-3.7"/><path d="M10 9.9v7.6"/></svg>',
+  levels:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 5.5 10 2.5l7.5 3v.01L10 8.5l-7.5-3z"/><path d="m2.5 10 7.5 3 7.5-3M2.5 14.3 10 17.3l7.5-3"/></svg>',
+  movements:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12.5 8 8l3 3 5-5.5"/><path d="M12.5 5h3.5v3.5"/><path d="M3 17h14"/></svg>',
+  admin:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2.5 16.5 5v5c0 4-2.8 6.5-6.5 7.5-3.7-1-6.5-3.5-6.5-7.5V5z"/><path d="m7.2 10 1.8 1.8 3.8-3.8"/></svg>',
+};
+const NAV_BASE = [
+  { id:'dashboard', label:'Dashboard', icon:'dashboard' },
+  { id:'products', label:'Items', icon:'products' },
+  { id:'levels', label:'Stock Levels', icon:'levels' },
+  { id:'movements', label:'Stock Movements', icon:'movements' },
+];
+function currentNav(){
+  return (authUser && authUser.role==='admin') ? [...NAV_BASE, { id:'admin', label:'Admin Panel', icon:'admin' }] : NAV_BASE;
+}
+
+function renderNav(){
+  document.getElementById('nav-list').innerHTML = currentNav().map(n=>`
+    <a href="#" onclick="goTo('${n.id}');return false;"
+       class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors ${ui.tab===n.id ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
+      ${ICONS[n.icon]}<span>${n.label}</span>
+    </a>
+  `).join('');
+}
+function goTo(tab){
+  ui.tab = tab;
+  toggleSidebar(false);
+  render();
+  window.scrollTo(0,0);
+}
+function toggleSidebar(open){
+  ui.sidebarOpen = open;
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebar-backdrop');
+  if(open){ sb.classList.remove('-translate-x-full'); bd.classList.remove('hidden'); }
+  else { sb.classList.add('-translate-x-full'); bd.classList.add('hidden'); }
+}
+
+/* =====================================================================
+   MODAL & CONFIRM
+===================================================================== */
+function openModal(title, bodyHtml, wide){
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-box').classList.toggle('max-w-lg', !wide);
+  document.getElementById('modal-box').classList.toggle('max-w-2xl', !!wide);
+  const overlay = document.getElementById('modal-overlay');
+  overlay.classList.remove('hidden');
+  overlay.classList.add('flex');
+}
+function closeModal(){
+  const overlay = document.getElementById('modal-overlay');
+  overlay.classList.add('hidden');
+  overlay.classList.remove('flex');
+  document.getElementById('modal-body').innerHTML = '';
+}
+document.getElementById('modal-overlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'modal-overlay') closeModal();
+});
+function confirmAction(message, onYes){
+  openModal('Please confirm', `
+    <p class="text-sm text-slate-700 mb-5">${esc(message)}</p>
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700" id="confirm-yes-btn">Yes, continue</button>
+    </div>
+  `);
+  document.getElementById('confirm-yes-btn').onclick = () => { closeModal(); onYes(); };
+}
+
+/* =====================================================================
+   INIT
+===================================================================== */
+async function init(){
+  const [products, movements] = await Promise.all([
+    getJSON('products', []),
+    getJSON('movements', []),
+  ]);
+  state.products = products || [];
+  state.movements = movements || [];
+  const cfg = getCloudConfig();
+  if(cfg) cloudStatus = 'connecting'; // avoid a flash of the app before we know sign-in state
+  renderApp();
+  if(cfg) initCloudIfConfigured();
+}
+
+function renderApp(){
+  const cfg = getCloudConfig();
+  const needsAuth = !!cfg && cloudStatus !== 'local' && cloudStatus !== 'error';
+  const authScreen = document.getElementById('auth-screen');
+  const appRoot = document.getElementById('app-root');
+  if(needsAuth && !authUser){
+    appRoot.classList.add('hidden');
+    authScreen.classList.remove('hidden');
+    authScreen.classList.add('flex');
+    renderAuthScreen();
+  } else {
+    authScreen.classList.add('hidden');
+    authScreen.classList.remove('flex');
+    appRoot.classList.remove('hidden');
+    if(ui.tab==='admin' && !(authUser && authUser.role==='admin')) ui.tab = 'dashboard';
+    render();
+  }
+}
+
+function render(){
+  renderNav();
+  renderSidebarFoot();
+  const el = document.getElementById('main-inner');
+  try{
+    if(ui.tab==='dashboard') el.innerHTML = viewDashboard();
+    else if(ui.tab==='products') el.innerHTML = viewProducts();
+    else if(ui.tab==='levels') el.innerHTML = viewStockLevels();
+    else if(ui.tab==='movements') el.innerHTML = viewMovements();
+    else if(ui.tab==='admin') el.innerHTML = viewAdmin();
+  }catch(e){
+    console.error(e);
+    el.innerHTML = `<div class="text-center py-16 text-slate-500"><h3 class="text-base font-semibold text-slate-800 mb-1">Something went wrong</h3><p class="text-sm">${esc(e.message)}</p></div>`;
+  }
+}
+function rerenderMain(){ render(); }
+
+init();
+
+/* =====================================================================
+   COMPUTED STATS
+===================================================================== */
+function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; }
+function productTotalQty(p){ return LOCATIONS.reduce((sum,l)=> sum + qtyAt(p, l.id), 0); }
+function isLowStock(p){ return p.reorderLevel!=null && productTotalQty(p) <= p.reorderLevel; }
+function totalUnits(){ return state.products.reduce((s,p)=>s+productTotalQty(p), 0); }
+function lowStockProducts(){ return state.products.filter(isLowStock); }
+function locationTotalUnits(locId){ return state.products.reduce((s,p)=>s+qtyAt(p, locId), 0); }
+function locationTotalItems(locId){ return state.products.filter(p=>qtyAt(p, locId) > 0).length; }
+function categoryBreakdown(){
+  const map = {};
+  state.products.forEach(p=>{
+    const cat = (p.category||'').trim() || 'Uncategorized';
+    map[cat] = (map[cat]||0) + productTotalQty(p);
+  });
+  return Object.entries(map).map(([category, units])=>({category, units})).sort((a,b)=>b.units-a.units);
+}
+
+/* =====================================================================
+   VIEW: DASHBOARD
+===================================================================== */
+function viewDashboard(){
+  const low = lowStockProducts();
+  const breakdown = categoryBreakdown();
+  const maxUnits = Math.max(1, ...breakdown.map(b=>b.units));
+  const barColors = ['bg-brand-500','bg-emerald-500','bg-amber-500','bg-sky-500','bg-fuchsia-500','bg-rose-500','bg-teal-500','bg-orange-500'];
+
+  const recent = [...state.movements].sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,8);
+
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Dashboard</h1>
+        <p class="text-sm text-slate-500 mt-0.5">An overview of your inventory.</p>
+      </div>
+      <div class="flex gap-2.5">
+        <button onclick="goTo('movements'); setTimeout(()=>openMovementForm('in'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
+        <button onclick="goTo('movements'); setTimeout(()=>openMovementForm('out'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      ${statCard('Total items', fmtNum(state.products.length), state.products.length + ' active SKUs', 'brand')}
+      ${statCard('Total units in stock', fmtNum(totalUnits()), 'Across ' + distinctCategories().length + ' categories', 'emerald')}
+      ${statCard('Low-stock items', fmtNum(low.length), low.length ? 'At or below reorder level' : 'All items well stocked', low.length ? 'amber' : 'slate')}
+      ${statCard('Locations', fmtNum(LOCATIONS.length), 'Tracking stock across all sites', 'slate')}
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      ${LOCATIONS.map(l=>`
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${l.color}"></span>
+            <span class="text-sm font-bold text-slate-900 truncate">${esc(l.name)}</span>
+            <span class="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(l.code)}</span>
+          </div>
+          <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Items in stock</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalItems(l.id))}</span></div>
+          <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Total units</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalUnits(l.id))}</span></div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-6">
+      <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+        <div class="text-sm font-bold text-slate-900 mb-1">Stock by category</div>
+        <div class="text-xs text-slate-500 mb-5">Units on hand, grouped by category</div>
+        ${breakdown.length ? `
+        <div class="space-y-3.5">
+          ${breakdown.map((b,i)=>`
+            <div>
+              <div class="flex justify-between text-xs font-medium text-slate-600 mb-1">
+                <span class="truncate pr-2">${esc(b.category)}</span>
+                <span class="num shrink-0">${fmtNum(b.units)} units</span>
+              </div>
+              <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                <div class="h-full rounded-full bar-fill ${barColors[i % barColors.length]}" style="width:${Math.max(3, Math.round(b.units/maxUnits*100))}%"></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>` : `<div class="text-center py-10 text-sm text-slate-400">Add items to see a category breakdown.</div>`}
+      </div>
+
+      <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+        <div class="text-sm font-bold text-slate-900 mb-1">Low-stock alerts</div>
+        <div class="text-xs text-slate-500 mb-4">Items at or below their reorder level</div>
+        ${low.length ? `
+        <ul class="divide-y divide-slate-100">
+          ${low.slice(0,6).map(p=>`
+            <li class="py-2.5 flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-slate-800 truncate">${esc(p.name)}</div>
+                <div class="text-[11px] text-slate-400">${esc(p.sku||'No SKU')}</div>
+              </div>
+              <span class="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 num">${fmtNum(productTotalQty(p))} / ${fmtNum(p.reorderLevel)}</span>
+            </li>
+          `).join('')}
+        </ul>
+        ${low.length>6 ? `<button onclick="goTo('products')" class="mt-3 text-xs font-semibold text-brand-600 hover:underline">View all ${low.length} →</button>` : ''}
+        ` : `<div class="text-center py-10 text-sm text-slate-400">Nothing is low on stock right now.</div>`}
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-100">
+        <div class="text-sm font-bold text-slate-900">Recent stock movements</div>
+        <button onclick="goTo('movements')" class="text-xs font-semibold text-brand-600 hover:underline">View all →</button>
+      </div>
+      ${recent.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-2.5 font-semibold">Date</th><th class="py-2.5 font-semibold">Type</th><th class="py-2.5 font-semibold">Item</th><th class="py-2.5 font-semibold">Location</th><th class="py-2.5 font-semibold text-right pr-5 sm:pr-6">Qty</th>
+          </tr></thead>
+          <tbody>${recent.map(m=>movementRow(m,true)).join('')}</tbody>
+        </table>
+      </div>` : `<div class="text-center py-10 text-sm text-slate-400">No stock movements logged yet.</div>`}
+    </div>
+  `;
+}
+
+function statCard(label, value, sub, color){
+  const accents = { brand:'border-l-brand-500', emerald:'border-l-emerald-500', amber:'border-l-amber-500', slate:'border-l-slate-300' };
+  return `
+    <div class="bg-white rounded-xl border border-slate-200 border-l-4 ${accents[color]||accents.slate} p-5">
+      <div class="text-xs font-medium text-slate-500">${label}</div>
+      <div class="text-[26px] font-extrabold text-slate-900 mt-1 num">${value}</div>
+      <div class="text-[11.5px] text-slate-400 mt-1">${sub}</div>
+    </div>
+  `;
+}
+
+/* =====================================================================
+   VIEW: STOCK LEVELS
+===================================================================== */
+function viewStockLevels(){
+  const list = [...state.products].sort(byName);
+  const rows = list.map(p=>{
+    const total = productTotalQty(p);
+    const low = isLowStock(p);
+    const cells = LOCATIONS.map(l=>{
+      const q = qtyAt(p, l.id);
+      return `<td class="py-3 text-right num">${q ? fmtNum(q) : '<span class="text-slate-300">—</span>'}</td>`;
+    }).join('');
+    return `
+      <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+        <td class="px-5 sm:px-6 py-3">
+          <div class="font-semibold text-slate-800">${esc(p.name)} ${low?'<span class="ml-1.5 inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold">Low</span>':''}</div>
+          <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}${p.category?(' · '+esc(p.category)):''}</div>
+        </td>
+        ${cells}
+        <td class="py-3 pr-5 sm:pr-6 text-right num font-bold text-slate-900">${fmtNum(total)}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Stock Levels</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Quantity on hand for every item, by location.</p>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Item</th>
+            ${LOCATIONS.map(l=>`<th class="py-3 font-semibold text-right">${esc(l.code)}</th>`).join('')}
+            <th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Total</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No items yet</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">Add items to see stock levels across all 4 locations.</p>
+      </div>`}
+    </div>
+  `;
+}
+
+/* =====================================================================
+   VIEW: PRODUCTS
+===================================================================== */
+function viewProducts(){
+  const f = ui.productsFilter;
+  let list = [...state.products];
+  if(f.category) list = list.filter(p=>(p.category||'')===f.category);
+  if(f.search){
+    const q = f.search.toLowerCase();
+    list = list.filter(p=> (p.name+' '+(p.sku||'')).toLowerCase().includes(q));
+  }
+  list.sort(byName);
+
+  const catOptions = distinctCategories().map(c=>`<option value="${esc(c)}" ${f.category===c?'selected':''}>${esc(c)}</option>`).join('');
+
+  const rows = list.map(p=>{
+    const low = isLowStock(p);
+    return `
+      <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+        <td class="px-5 sm:px-6 py-3">
+          <div class="font-semibold text-slate-800">${esc(p.name)}</div>
+          <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
+        </td>
+        <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">${esc(p.category||'Uncategorized')}</span></td>
+        <td class="py-3 text-right num">${fmtNum(productTotalQty(p))}</td>
+        <td class="py-3 text-right num">${fmtNum(p.reorderLevel)}</td>
+        <td class="py-3 text-center">${low ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Low stock</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}</td>
+        <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+          <button onclick="openProductForm('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
+          <button onclick="deleteProduct('${p.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Items</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Your full item catalog.</p>
+      </div>
+      <div class="flex gap-2.5">
+        <button onclick="exportProductsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
+        <button onclick="openProductForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Add Item</button>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-2.5 mb-4">
+      <input type="text" placeholder="Search by name or SKU…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
+        class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <select onchange="ui.productsFilter.category=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <option value="">All categories</option>${catOptions}
+      </select>
+      <span class="self-center text-xs text-slate-400 ml-auto">${list.length} item${list.length===1?'':'s'}</span>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Item</th>
+            <th class="py-3 font-semibold">Category</th>
+            <th class="py-3 font-semibold text-right">Qty on hand</th>
+            <th class="py-3 font-semibold text-right">Reorder level</th>
+            <th class="py-3 font-semibold text-center">Status</th>
+            <th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No items yet</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">Add your first item — set its cost, price and reorder level so the dashboard can track it.</p>
+        <button onclick="openProductForm()" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">+ Add Item</button>
+      </div>`}
+    </div>
+  `;
+}
+
+function openProductForm(id){
+  const editing = id ? getProduct(id) : null;
+  const catList = distinctCategories();
+  const body = `
+    <div id="pf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item name *</label>
+      <input type="text" id="pf-name" value="${editing?esc(editing.name):''}" placeholder="e.g. Wireless Mouse" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">SKU</label>
+        <input type="text" id="pf-sku" value="${editing?esc(editing.sku||''):''}" placeholder="Optional" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Category</label>
+        <input type="text" id="pf-category" list="pf-category-list" value="${editing?esc(editing.category||''):''}" placeholder="e.g. Accessories" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <datalist id="pf-category-list">${catList.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-2">Quantity on hand by location</label>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        ${LOCATIONS.map(l=>`
+          <div>
+            <label class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 mb-1"><span class="w-2 h-2 rounded-full shrink-0" style="background:${l.color}"></span>${esc(l.code)}</label>
+            <input type="number" min="0" step="any" id="pf-qty-${l.id}" value="${editing?qtyAt(editing,l.id):'0'}" class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+          </div>
+        `).join('')}
+      </div>
+      <div class="text-[11px] text-slate-400 mt-1.5">Use Stock Movements to log day-to-day changes at a location.</div>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reorder level (total across locations)</label>
+      <input type="number" min="0" step="any" id="pf-reorder" value="${editing&&editing.reorderLevel!=null?editing.reorderLevel:'0'}" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveProduct('${editing?editing.id:''}')">${editing?'Save changes':'Add item'}</button>
+    </div>
+  `;
+  openModal(editing?'Edit item':'Add item', body, true);
+}
+
+function saveProduct(id){
+  const errEl = document.getElementById('pf-error');
+  errEl.classList.add('hidden');
+  const name = document.getElementById('pf-name').value.trim();
+  if(!name){ errEl.textContent='Item name is required.'; errEl.classList.remove('hidden'); return; }
+  const stock = {};
+  LOCATIONS.forEach(l=>{ stock[l.id] = Number(document.getElementById('pf-qty-'+l.id).value) || 0; });
+  const data = {
+    name,
+    sku: document.getElementById('pf-sku').value.trim(),
+    category: document.getElementById('pf-category').value.trim(),
+    stock,
+    reorderLevel: Number(document.getElementById('pf-reorder').value) || 0,
+  };
+  let savedProduct;
+  if(id){
+    savedProduct = getProduct(id);
+    Object.assign(savedProduct, data);
+  } else {
+    savedProduct = { id: uid(), ...data, createdAt: nowISO() };
+    state.products.push(savedProduct);
+  }
+  persistItemDoc(savedProduct);
+  closeModal();
+  toast(id ? 'Item updated.' : 'Item added.');
+  rerenderMain();
+}
+
+function deleteProduct(id){
+  confirmAction('Delete this item and its stock movement history? This cannot be undone.', async ()=>{
+    const movementsToDelete = state.movements.filter(m=>m.productId===id);
+    state.products = state.products.filter(p=>p.id!==id);
+    state.movements = state.movements.filter(m=>m.productId!==id);
+    await deleteItemDoc(id);
+    for(const m of movementsToDelete){ await deleteMovementDoc(m.id); }
+    toast('Item deleted.');
+    rerenderMain();
+  });
+}
+
+/* =====================================================================
+   VIEW: STOCK MOVEMENTS
+===================================================================== */
+function locTag(locId){
+  const l = getLocation(locId);
+  if(!l) return '<span class="text-slate-400">—</span>';
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium"><span class="w-1.5 h-1.5 rounded-full" style="background:${l.color}"></span>${esc(l.code)}</span>`;
+}
+function movementRow(m, compact){
+  const p = getProduct(m.productId);
+  const badge = m.type==='in'
+    ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">Stock In</span>'
+    : '<span class="inline-flex px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-xs font-semibold">Stock Out</span>';
+  if(compact){
+    return `
+      <tr class="border-b border-slate-100 last:border-0">
+        <td class="px-5 sm:px-6 py-2.5 text-slate-500">${fmtDate(m.date)}</td>
+        <td class="py-2.5">${badge}</td>
+        <td class="py-2.5 text-slate-700">${p?esc(p.name):'<span class="text-slate-400">Deleted item</span>'}</td>
+        <td class="py-2.5">${locTag(m.locationId)}</td>
+        <td class="py-2.5 pr-5 sm:pr-6 text-right num font-medium">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
+      </tr>`;
+  }
+  return `
+    <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+      <td class="px-5 sm:px-6 py-3 text-slate-500">${fmtDate(m.date)}</td>
+      <td class="py-3">${badge}</td>
+      <td class="py-3 text-slate-700">${p?esc(p.name):'<span class="text-slate-400">Deleted item</span>'}</td>
+      <td class="py-3">${locTag(m.locationId)}</td>
+      <td class="py-3 text-right num font-medium ${m.type==='in'?'text-emerald-600':'text-rose-600'}">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
+      <td class="py-3 text-slate-500">${esc(m.reason||'—')}</td>
+      <td class="py-3 text-slate-500">${issuedToLabel(m)}</td>
+      <td class="py-3 text-slate-500">${esc(m.loggedByName||'—')}</td>
+      <td class="py-3 pr-5 sm:pr-6 text-right"><button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button></td>
+    </tr>`;
+}
+function issuedToLabel(m){
+  if(m.type!=='out' || (!m.staffName && !m.department)) return '—';
+  if(m.staffName && m.department) return esc(m.staffName) + ' <span class="text-slate-400">· ' + esc(m.department) + '</span>';
+  return esc(m.staffName || m.department);
+}
+
+function getFilteredMovements(){
+  const f = ui.movementsFilter;
+  let list = [...state.movements];
+  if(f.type) list = list.filter(m=>m.type===f.type);
+  if(f.locationId) list = list.filter(m=>m.locationId===f.locationId);
+  if(f.dateFrom) list = list.filter(m=>m.date >= f.dateFrom);
+  if(f.dateTo) list = list.filter(m=>m.date <= f.dateTo);
+  if(f.search){
+    const q = f.search.toLowerCase();
+    list = list.filter(m=>{
+      const p = getProduct(m.productId);
+      return ((p?p.name:'')+' '+(m.reason||'')+' '+(m.department||'')+' '+(m.staffName||'')).toLowerCase().includes(q);
+    });
+  }
+  return list;
+}
+function hasActiveMovementFilters(){
+  const f = ui.movementsFilter;
+  return !!(f.search || f.type || f.locationId || f.dateFrom || f.dateTo);
+}
+function clearMovementFilters(){
+  ui.movementsFilter = { search:'', type:'', locationId:'', dateFrom:'', dateTo:'' };
+  rerenderMain();
+}
+
+/* =====================================================================
+   VIEW: ADMIN PANEL — visible only to users with role 'admin'
+===================================================================== */
+function listenToAllProfiles(){
+  if(allProfilesUnsub || !firestoreProfilesRef) return;
+  allProfilesUnsub = () => {}; // set immediately so a same-tick callback can't cause reentrant re-subscription
+  allProfilesUnsub = firestoreProfilesRef.onSnapshot(snap=>{
+    state.profiles = snap.docs.map(d=>d.data());
+    if(ui.tab==='admin') render();
+  }, err=>{
+    toast('Could not load the user list — check Firestore rules allow admins to read all profiles.', true);
+  });
+}
+function viewAdmin(){
+  listenToAllProfiles();
+  const list = [...state.profiles].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const rows = list.map(p=>{
+    const isSelf = authUser && p.uid===authUser.uid;
+    return `
+      <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+        <td class="px-5 sm:px-6 py-3">
+          <div class="flex items-center gap-2.5">
+            <div class="w-7 h-7 rounded-full bg-brand-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">${esc(initials(p.name))}</div>
+            <span class="font-medium text-slate-800">${esc(p.name)}</span>
+            ${isSelf?'<span class="inline-flex px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[11px] font-semibold">You</span>':''}
+          </div>
+        </td>
+        <td class="py-3 text-slate-500">${esc(p.email)}</td>
+        <td class="py-3 text-slate-500">${esc(p.designation||'—')}</td>
+        <td class="py-3 text-slate-500">${esc(p.department||'—')}</td>
+        <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full ${p.role==='admin'?'bg-violet-100 text-violet-700':'bg-slate-100 text-slate-600'} text-xs font-semibold capitalize">${esc(p.role||'member')}</span></td>
+        <td class="py-3 pr-5 sm:pr-6 text-right"><button onclick="openEditUserModal('${p.uid}')" class="text-xs font-semibold text-brand-600 hover:underline">Edit</button></td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Admin Panel</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Manage everyone signed in to this shared database.</p>
+      </div>
+    </div>
+    <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
+      Nobody can set another person's password directly here — that would need a backend server. You can update someone's designation, department, and role, or send them a password reset email.
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Name</th><th class="py-3 font-semibold">Email</th><th class="py-3 font-semibold">Designation</th><th class="py-3 font-semibold">Department</th><th class="py-3 font-semibold">Role</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">Loading users…</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto">If this doesn't update, make sure Firestore rules allow admins to read the fdc_inventory_profiles collection.</p>
+      </div>`}
+    </div>
+  `;
+}
+function openEditUserModal(uid){
+  const p = state.profiles.find(x=>x.uid===uid);
+  if(!p) return;
+  const isSelf = authUser && p.uid===authUser.uid;
+  const adminCount = state.profiles.filter(x=>x.role==='admin').length;
+  const lockRole = isSelf && p.role==='admin' && adminCount<=1;
+  const body = `
+    <div id="admin-edit-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-3 text-sm font-semibold text-slate-800">${esc(p.name)} <span class="text-slate-400 font-normal">· ${esc(p.email)}</span></div>
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Designation</label>
+        <input type="text" id="ae-designation" value="${esc(p.designation||'')}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
+        <input type="text" id="ae-department" value="${esc(p.department||'')}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Role</label>
+      <select id="ae-role" ${lockRole?'disabled':''} class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <option value="member" ${p.role!=='admin'?'selected':''}>Member</option>
+        <option value="admin" ${p.role==='admin'?'selected':''}>Admin</option>
+      </select>
+      ${lockRole?'<div class="text-[11px] text-slate-400 mt-1.5">You are the only admin, so this role cannot be changed here.</div>':''}
+    </div>
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <button onclick="sendPasswordResetForUser('${esc(p.email)}')" class="text-[12.5px] font-semibold text-slate-500 hover:text-slate-700">Send password reset email</button>
+      <div class="flex gap-2.5">
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveUserEdit('${uid}')">Save</button>
+      </div>
+    </div>
+  `;
+  openModal('Edit user', body, true);
+}
+async function saveUserEdit(uid){
+  const errEl = document.getElementById('admin-edit-error');
+  errEl.classList.add('hidden');
+  const designation = document.getElementById('ae-designation').value.trim();
+  const department = document.getElementById('ae-department').value.trim();
+  const roleEl = document.getElementById('ae-role');
+  const target = state.profiles.find(x=>x.uid===uid);
+  const adminCount = state.profiles.filter(x=>x.role==='admin').length;
+  if(!roleEl.disabled && target.role==='admin' && roleEl.value==='member' && adminCount<=1){
+    errEl.textContent = 'At least one admin is required.'; errEl.classList.remove('hidden'); return;
+  }
+  try{
+    const data = { designation, department };
+    if(!roleEl.disabled) data.role = roleEl.value;
+    await firestoreProfilesRef.doc(uid).set(data, { merge:true });
+    closeModal();
+    toast('User updated.');
+  }catch(e){
+    errEl.textContent = 'Could not save — ' + (e && e.message ? e.message : 'check Firestore permissions.'); errEl.classList.remove('hidden');
+  }
+}
+async function sendPasswordResetForUser(email){
+  try{
+    await firebaseAuth.sendPasswordResetEmail(email);
+    toast('Password reset email sent to ' + email + '.');
+  }catch(e){
+    toast(friendlyAuthError(e), true);
+  }
+}
+
+function viewMovements(){
+  const f = ui.movementsFilter;
+  let list = getFilteredMovements();
+  list.sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt));
+
+  const totalIn = list.filter(m=>m.type==='in').reduce((s,m)=>s+m.quantity,0);
+  const totalOut = list.filter(m=>m.type==='out').reduce((s,m)=>s+m.quantity,0);
+  const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
+
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Stock Movements</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Log stock coming in and going out, and generate a report for any period.</p>
+      </div>
+      <div class="flex gap-2.5 flex-wrap">
+        <button onclick="exportMovementsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export report (CSV)</button>
+        <button onclick="openMovementForm('in')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
+        <button onclick="openMovementForm('out')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
+      <div class="flex flex-wrap gap-2.5">
+        <input type="text" placeholder="Search by item, reason, staff or department…" value="${esc(f.search)}" oninput="ui.movementsFilter.search=this.value; rerenderMain();"
+          class="flex-1 min-w-[180px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <select onchange="ui.movementsFilter.type=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="">All types</option>
+          <option value="in" ${f.type==='in'?'selected':''}>Stock In</option>
+          <option value="out" ${f.type==='out'?'selected':''}>Stock Out</option>
+        </select>
+        <select onchange="ui.movementsFilter.locationId=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="">All locations</option>${locOptions}
+        </select>
+      </div>
+      <div class="flex flex-wrap items-center gap-2.5 mt-2.5">
+        <label class="text-xs font-semibold text-slate-500">From</label>
+        <input type="date" value="${esc(f.dateFrom)}" onchange="ui.movementsFilter.dateFrom=this.value; rerenderMain();" class="px-3.5 py-2 rounded-lg border border-slate-300 text-sm">
+        <label class="text-xs font-semibold text-slate-500">To</label>
+        <input type="date" value="${esc(f.dateTo)}" onchange="ui.movementsFilter.dateTo=this.value; rerenderMain();" class="px-3.5 py-2 rounded-lg border border-slate-300 text-sm">
+        ${hasActiveMovementFilters() ? `<button onclick="clearMovementFilters()" class="text-xs font-semibold text-brand-600 hover:underline">Clear filters</button>` : ''}
+        <span class="text-xs text-slate-400 ml-auto">${list.length} record${list.length===1?'':'s'}</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div class="bg-white rounded-xl border border-slate-200 border-l-4 border-l-emerald-500 p-4">
+        <div class="text-xs font-medium text-slate-500">Stock in (filtered)</div>
+        <div class="text-xl font-extrabold text-slate-900 mt-0.5 num">+${fmtNum(totalIn)}</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 border-l-4 border-l-rose-500 p-4">
+        <div class="text-xs font-medium text-slate-500">Stock out (filtered)</div>
+        <div class="text-xl font-extrabold text-slate-900 mt-0.5 num">-${fmtNum(totalOut)}</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold">Location</th>
+            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Reason / reference</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${list.map(m=>movementRow(m,false)).join('')}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No stock movements ${hasActiveMovementFilters()?'match these filters':'yet'}</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">${hasActiveMovementFilters()?'Try widening the date range or clearing a filter.':'Log a Stock In or Stock Out to start tracking activity — quantities update automatically.'}</p>
+      </div>`}
+    </div>
+  `;
+}
+
+function openMovementForm(type){
+  if(state.products.length===0){ toast('Add at least one item before logging stock movements.', true); return; }
+  const options = [...state.products].sort(byName).map(p=>`<option value="${p.id}">${esc(p.name)}${p.sku?(' — '+esc(p.sku)):''}</option>`).join('');
+  const isIn = type==='in';
+  const body = `
+    <div id="mf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-4">
+      <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${isIn?'bg-emerald-100 text-emerald-700':'bg-rose-100 text-rose-700'}">${isIn?'Stock In':'Stock Out'}</span>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
+        <select id="mf-product" onchange="updateMovementHint()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">${options}</select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
+        <select id="mf-location" onchange="updateMovementHint()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${LOCATIONS.map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="mf-hint" class="text-[11.5px] text-slate-400 -mt-2 mb-4"></div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
+        <input type="number" min="0" step="any" id="mf-qty" oninput="updateMovementHint()" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
+        <input type="date" id="mf-date" value="${todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / reference</label>
+      <input type="text" id="mf-reason" placeholder="${isIn?'e.g. Restock from supplier':'e.g. Sold to customer, damaged'}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    ${!isIn ? `
+    <div class="grid grid-cols-2 gap-4 mb-5">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
+        <input type="text" id="mf-department" placeholder="e.g. Operations" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Staff name</label>
+        <input type="text" id="mf-staffname" placeholder="Who is it issued to?" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>` : ''}
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold text-white ${isIn?'bg-emerald-600 hover:bg-emerald-700':'bg-rose-600 hover:bg-rose-700'}" onclick="saveMovement('${type}')">${isIn?'Log Stock In':'Log Stock Out'}</button>
+    </div>
+  `;
+  openModal(isIn?'Log Stock In':'Log Stock Out', body);
+  updateMovementHint();
+}
+function updateMovementHint(){
+  const hint = document.getElementById('mf-hint');
+  const pid = document.getElementById('mf-product').value;
+  const locId = document.getElementById('mf-location').value;
+  const p = getProduct(pid);
+  const loc = getLocation(locId);
+  if(hint && p && loc) hint.textContent = 'Currently in stock at ' + loc.name + ': ' + fmtNum(qtyAt(p, locId)) + (p.sku ? ' · ' + p.sku : '');
+}
+function saveMovement(type){
+  const errEl = document.getElementById('mf-error');
+  errEl.classList.add('hidden');
+  const productId = document.getElementById('mf-product').value;
+  const locationId = document.getElementById('mf-location').value;
+  const qty = Number(document.getElementById('mf-qty').value);
+  const date = document.getElementById('mf-date').value;
+  const reason = document.getElementById('mf-reason').value.trim();
+  const department = type==='out' ? document.getElementById('mf-department').value.trim() : '';
+  const staffName = type==='out' ? document.getElementById('mf-staffname').value.trim() : '';
+  const p = getProduct(productId);
+  const loc = getLocation(locationId);
+
+  if(!p) { errEl.textContent='Choose an item.'; errEl.classList.remove('hidden'); return; }
+  if(!loc) { errEl.textContent='Choose a location.'; errEl.classList.remove('hidden'); return; }
+  if(!qty || qty<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
+  if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
+  const currentAtLoc = qtyAt(p, locationId);
+  if(type==='out' && qty > currentAtLoc){
+    errEl.textContent = `Only ${fmtNum(currentAtLoc)} in stock at ${loc.name} — reduce the quantity or log a Stock In first.`;
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  if(!p.stock) p.stock = {};
+  p.stock[locationId] = type==='in' ? currentAtLoc + qty : currentAtLoc - qty;
+  const newMovement = {
+    id: uid(), type, productId, locationId, quantity: qty, date, reason, department, staffName, createdAt: nowISO(),
+    loggedByName: authUser ? authUser.name : null,
+    loggedByEmail: authUser ? authUser.email : null,
+  };
+  state.movements.push(newMovement);
+  persistItemDoc(p);
+  persistMovementDoc(newMovement);
+  closeModal();
+  toast('Stock movement logged.');
+  rerenderMain();
+}
+function deleteMovement(id){
+  const m = state.movements.find(x=>x.id===id);
+  if(!m) return;
+  confirmAction('Delete this movement? The quantity change it made will be reversed.', ()=>{
+    const p = getProduct(m.productId);
+    if(p && p.stock){
+      const cur = qtyAt(p, m.locationId);
+      p.stock[m.locationId] = m.type==='in' ? cur - m.quantity : cur + m.quantity;
+    }
+    state.movements = state.movements.filter(x=>x.id!==id);
+    if(p) persistItemDoc(p);
+    deleteMovementDoc(id);
+    toast('Movement deleted.');
+    rerenderMain();
+  });
+}
+
+/* =====================================================================
+   CSV EXPORT
+===================================================================== */
+function csvCell(v){
+  const s = String(v==null?'':v);
+  const nl = String.fromCharCode(10);
+  const needsQuote = s.indexOf(',')>=0 || s.indexOf('"')>=0 || s.indexOf(nl)>=0;
+  return needsQuote ? '"'+s.split('"').join('""')+'"' : s;
+}
+function downloadCSV(filename, header, rows){
+  const lines = [header.join(',')];
+  rows.forEach(r=> lines.push(r.map(csvCell).join(',')));
+  const blob = new Blob([lines.join(String.fromCharCode(10))], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function exportProductsCSV(){
+  const header = ['SKU','Name','Category', ...LOCATIONS.map(l=>l.name+' qty'), 'Total qty','Reorder level','Status'];
+  const rows = [...state.products].sort(byName).map(p=>[
+    p.sku||'', p.name, p.category||'', ...LOCATIONS.map(l=>qtyAt(p,l.id)), productTotalQty(p),
+    p.reorderLevel, isLowStock(p)?'Low stock':'In stock'
+  ]);
+  downloadCSV('items_' + todayStr() + '.csv', header, rows);
+}
+function exportMovementsCSV(){
+  const f = ui.movementsFilter;
+  const header = ['Date','Type','Item','SKU','Location','Quantity','Reason / reference','Department','Staff name','Logged by'];
+  const rows = getFilteredMovements().sort((a,b)=>a.date.localeCompare(b.date)).map(m=>{
+    const p = getProduct(m.productId);
+    const loc = getLocation(m.locationId);
+    return [m.date, m.type==='in'?'Stock In':'Stock Out', p?p.name:'', p?p.sku||'':'', loc?loc.name:'', m.quantity, m.reason||'', m.department||'', m.staffName||'', m.loggedByName||''];
+  });
+  if(rows.length===0){ toast('No movements match the current filters — nothing to export.', true); return; }
+  const rangePart = (f.dateFrom || f.dateTo) ? `_${f.dateFrom||'start'}_to_${f.dateTo||'now'}` : '_' + todayStr();
+  downloadCSV('stock_movements' + rangePart + '.csv', header, rows);
+}
+
+
+
+
+</script>
+</body>
+</html>
