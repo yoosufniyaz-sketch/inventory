@@ -242,9 +242,7 @@ function initials(name){
   return (parts[0][0] + (parts[1]?parts[1][0]:'')).toUpperCase();
 }
 
-function getCloudConfig(){
-  try{ const raw = localStorage.getItem(CLOUD_CONFIG_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
-}
+const DEFAULT_FIREBASE_CONFIG = {    apiKey: "AIzaSyBC_p38cBCkq3FRmb5wnfeJZTMafYV1FXw",    authDomain: "fdc-inventory.firebaseapp.com",    projectId: "fdc-inventory",    storageBucket: "fdc-inventory.firebasestorage.app",    messagingSenderId: "376772139420",    appId: "1:376772139420:web:dab35c35a7d84ad3e25059",    measurementId: "G-25CHH1XQKJ"  }; function getCloudConfig(){ try{ const raw = localStorage.getItem(CLOUD_CONFIG_KEY); if(raw) return JSON.parse(raw); return { firebaseConfig: DEFAULT_FIREBASE_CONFIG }; }catch(e){ return { firebaseConfig: DEFAULT_FIREBASE_CONFIG }; } }
 function setCloudConfig(cfg){
   if(cfg) localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cfg));
   else localStorage.removeItem(CLOUD_CONFIG_KEY);
