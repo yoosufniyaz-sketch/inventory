@@ -352,19 +352,7 @@ function listenToOwnProfile(user){
     renderApp();
   }, err=>{ /* profile is a nice-to-have on top of auth; a failure here shouldn't block the app */ });
 }
-async function ensureOwnProfileDoc(user, extra){
-  if(!firestoreProfilesRef) return;
-  try{
-    const snap = await firestoreProfilesRef.doc(user.uid).get();
-    if(!snap.exists){
-      const countSnap = await firestoreProfilesRef.limit(1).get();
-      const role = countSnap.empty ? 'admin' : 'member';
-      const data = Object.assign({ uid:user.uid, email:user.email, name:user.displayName||user.email, role, designation:'', department:'', createdAt: Date.now() }, extra||{});
-      await firestoreProfilesRef.doc(user.uid).set(data);
-      if(authUser && authUser.uid===user.uid){ authUser.role = role; renderApp(); } // reflect immediately, don't wait on the snapshot round-trip
-    }
-  }catch(e){ /* profile creation failing shouldn't block sign-in */ }
-}
+async function ensureOwnProfileDoc(user, extra){ if(!firestoreProfilesRef) return; try{ let assignedRole = null; await firestoreDb.runTransaction(async (tx) => { const ref = firestoreProfilesRef.doc(user.uid); const snap = await tx.get(ref); if(snap.exists) return; const countSnap = await tx.get(firestoreProfilesRef.limit(1)); const role = countSnap.empty ? 'admin' : 'member'; const data = Object.assign({ uid:user.uid, email:user.email, name:user.displayName||user.email, role, designation:'', department:'', createdAt: Date.now() }, extra||{}); tx.set(ref, data); assignedRole = role; }); if(assignedRole && authUser && authUser.uid===user.uid){ authUser.role = assignedRole; renderApp(); } }catch(e){ } }
 function listenToCloudItems(){
   if(itemsUnsub) itemsUnsub();
   itemsUnsub = firestoreItemsRef.onSnapshot(snap=>{
