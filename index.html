@@ -1573,10 +1573,7 @@ function downloadCSV(filename, header, rows){
   const a = document.createElement('a');
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-  const f = ui.movementsFilter;
+  
   const header = ['Date','Type','Item','SKU','Location','Quantity','Reason / reference','Department','Staff name','Logged by'];
   const rows = getFilteredMovements().sort((a,b)=>a.date.localeCompare(b.date)).map(m=>{
     const p = getProduct(m.productId);
