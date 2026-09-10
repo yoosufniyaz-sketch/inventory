@@ -1575,15 +1575,7 @@ function downloadCSV(filename, header, rows){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
-function exportProductsCSV(){
-  const header = ['SKU','Name','Category', ...LOCATIONS.map(l=>l.name+' qty'), ${low.slice(0,6).map(p=>{ const lowLocs = lowLocationsFor(p); return `<li class="py-2.5 flex items-center justify-between gap-3"><div class="min-w-0"><div class="text-sm font-medium text-slate-800 truncate">${esc(p.name)}</div><div class="text-[11px] text-slate-400">${esc(p.sku||'No SKU')}</div></div><div class="shrink-0 flex flex-col items-end gap-1">${lowLocs.map(l=>`<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 num">${esc(l.code)}: ${fmtNum(qtyAt(p,l.id))} / ${fmtNum(reorderLevelAt(p,l.id))}</span>`).join('')}</div></li>`;}).join('')}
-  const rows = [...state.products].sort(byName).map(p=>[
-    p.sku||'', p.name, p.category||'', ...LOCATIONS.map(l=>qtyAt(p,l.id)), productTotalQty(p),
-    'Total qty', ...LOCATIONS.map(l=>l.name+' reorder level'), 'Status'];
-  ]);
-  downloadCSV('items_' + todayStr() + '.csv', header, rows);
-}
-function exportMovementsCSV(){
+
   const f = ui.movementsFilter;
   const header = ['Date','Type','Item','SKU','Location','Quantity','Reason / reference','Department','Staff name','Logged by'];
   const rows = getFilteredMovements().sort((a,b)=>a.date.localeCompare(b.date)).map(m=>{
