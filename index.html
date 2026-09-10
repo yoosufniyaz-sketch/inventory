@@ -847,9 +847,7 @@ init();
 /* =====================================================================
    COMPUTED STATS
 ===================================================================== */
-function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; }
-function productTotalQty(p){ return LOCATIONS.reduce((sum,l)=> sum + qtyAt(p, l.id), 0); }
-function isLowStock(p){ return p.reorderLevel!=null && productTotalQty(p) <= p.reorderLevel; }
+function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; } function reorderLevelAt(p, locId){ if(p.reorderLevels && p.reorderLevels[locId]!=null) return p.reorderLevels[locId]; return p.reorderLevel!=null ? p.reorderLevel : 0; } function lowLocationsFor(p){ return LOCATIONS.filter(l => qtyAt(p,l.id) <= reorderLevelAt(p,l.id)); } function productTotalQty(p){ return LOCATIONS.reduce((sum,l)=> sum + qtyAt(p, l.id), 0); } function isLowStock(p){ return lowLocationsFor(p).length > 0; }
 function totalUnits(){ return state.products.reduce((s,p)=>s+productTotalQty(p), 0); }
 function lowStockProducts(){ return state.products.filter(isLowStock); }
 function locationTotalUnits(locId){ return state.products.reduce((s,p)=>s+qtyAt(p, locId), 0); }
@@ -932,15 +930,7 @@ function viewDashboard(){
         <div class="text-xs text-slate-500 mb-4">Items at or below their reorder level</div>
         ${low.length ? `
         <ul class="divide-y divide-slate-100">
-          ${low.slice(0,6).map(p=>`
-            <li class="py-2.5 flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <div class="text-sm font-medium text-slate-800 truncate">${esc(p.name)}</div>
-                <div class="text-[11px] text-slate-400">${esc(p.sku||'No SKU')}</div>
-              </div>
-              <span class="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 num">${fmtNum(productTotalQty(p))} / ${fmtNum(p.reorderLevel)}</span>
-            </li>
-          `).join('')}
+          text-[11px] font-semibold">Low at '+lowLocs.map(l=>esc(l.code)).join(', ')+'</span>':''}
         </ul>
         ${low.length>6 ? `<button onclick="goTo('products')" class="mt-3 text-xs font-semibold text-brand-600 hover:underline">View all ${low.length} →</button>` : ''}
         ` : `<div class="text-center py-10 text-sm text-slate-400">Nothing is low on stock right now.</div>`}
@@ -982,16 +972,14 @@ function statCard(label, value, sub, color){
 function viewStockLevels(){
   const list = [...state.products].sort(byName);
   const rows = list.map(p=>{
-    const total = productTotalQty(p);
-    const low = isLowStock(p);
+    text-right">${low ? '<span class="text-xs font-medium text-amber-700">'+lowLocs.map(l=>esc(l.code)).join(', ')+'</span>' : '<span class="text-slate-300">—</span>'}</td>
     const cells = LOCATIONS.map(l=>{
-      const q = qtyAt(p, l.id);
-      return `<td class="py-3 text-right num">${q ? fmtNum(q) : '<span class="text-slate-300">—</span>'}</td>`;
+      const total = productTotalQty(p); const lowLocs = lowLocationsFor(p); const low = lowLocs.length > 0;
     }).join('');
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
-          <div class="font-semibold text-slate-800">${esc(p.name)} ${low?'<span class="ml-1.5 inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold">Low</span>':''}</div>
+          <div class="font-semibold text-slate-800">${esc(p.name)} ${low?'<span class="ml-1.5 inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 const q = qtyAt(p, l.id); const cellLow = q <= reorderLevelAt(p, l.id); const qHtml = q ? fmtNum(q) : '<span class="text-slate-300">—</span>'; return `<td class="py-3 text-right num ${cellLow?'bg-amber-50 text-amber-800 font-semibold':''}" title="Reorder level: ${fmtNum(reorderLevelAt(p,l.id))}">${qHtml}</td>`;</div>
           <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}${p.category?(' · '+esc(p.category)):''}</div>
         </td>
         ${cells}
@@ -1042,9 +1030,7 @@ function viewProducts(){
 
   const catOptions = distinctCategories().map(c=>`<option value="${esc(c)}" ${f.category===c?'selected':''}>${esc(c)}</option>`).join('');
 
-  const rows = list.map(p=>{
-    const low = isLowStock(p);
-    return `
+  const rows = list.map(p=>{ const lowLocs = lowLocationsFor(p); const low = lowLocs.length > 0; return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
           <div class="font-semibold text-slate-800">${esc(p.name)}</div>
@@ -1052,7 +1038,7 @@ function viewProducts(){
         </td>
         <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">${esc(p.category||'Uncategorized')}</span></td>
         <td class="py-3 text-right num">${fmtNum(productTotalQty(p))}</td>
-        <td class="py-3 text-right num">${fmtNum(p.reorderLevel)}</td>
+        <td class="py-3 const rows = list.map(p=>{ const lowLocs = lowLocationsFor(p); const low = lowLocs.length > 0; return
         <td class="py-3 text-center">${low ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Low stock</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}</td>
         <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
           <button onclick="openProductForm('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
@@ -1090,7 +1076,7 @@ function viewProducts(){
             <th class="px-5 sm:px-6 py-3 font-semibold">Item</th>
             <th class="py-3 font-semibold">Category</th>
             <th class="py-3 font-semibold text-right">Qty on hand</th>
-            <th class="py-3 font-semibold text-right">Reorder level</th>
+            <th class="py-3 font-semibold text-right">Low at</th>
             <th class="py-3 font-semibold text-center">Status</th>
             <th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
@@ -1139,10 +1125,7 @@ function openProductForm(id){
       <div class="text-[11px] text-slate-400 mt-1.5">Use Stock Movements to log day-to-day changes at a location.</div>
     </div>
     <div class="mb-4">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reorder level (total across locations)</label>
-      <input type="number" min="0" step="any" id="pf-reorder" value="${editing&&editing.reorderLevel!=null?editing.reorderLevel:'0'}" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-    </div>
-    <div class="flex justify-end gap-2.5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reorder level by location</label><div class="grid grid-cols-2 sm:grid-cols-4 gap-3">${LOCATIONS.map(l=>`<div><label class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 mb-1"><span class="w-2 h-2 rounded-full shrink-0" style="background:${l.color}"></span>${esc(l.code)}</label><input type="number" min="0" step="any" id="pf-reorder-${l.id}" value="${editing?reorderLevelAt(editing,l.id):'0'}" class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"></div>`).join('')}</div><div class="text-[11px] text-slate-400 mt-1.5">An item is flagged low-stock at whichever location(s) fall at or below that location's own number.</div></div><div class="flex justify-end gap-2.5">
       <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
       <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveProduct('${editing?editing.id:''}')">${editing?'Save changes':'Add item'}</button>
     </div>
@@ -1156,13 +1139,7 @@ function saveProduct(id){
   const name = document.getElementById('pf-name').value.trim();
   if(!name){ errEl.textContent='Item name is required.'; errEl.classList.remove('hidden'); return; }
   const stock = {};
-  LOCATIONS.forEach(l=>{ stock[l.id] = Number(document.getElementById('pf-qty-'+l.id).value) || 0; });
-  const data = {
-    name,
-    sku: document.getElementById('pf-sku').value.trim(),
-    category: document.getElementById('pf-category').value.trim(),
-    stock,
-    reorderLevel: Number(document.getElementById('pf-reorder').value) || 0,
+  LOCATIONS.forEach(l=>{ stock[l.id] = Number(document.getElementById('pf-qty-'+l.id).value) || 0; }); const reorderLevels = {}; LOCATIONS.forEach(l=>{ reorderLevels[l.id] = Number(document.getElementById('pf-reorder-'+l.id).value) || 0; }); const data = { name, sku: document.getElementById('pf-sku').value.trim(), category: document.getElementById('pf-category').value.trim(), stock, reorderLevels,
   };
   let savedProduct;
   if(id){
@@ -1599,10 +1576,10 @@ function downloadCSV(filename, header, rows){
   URL.revokeObjectURL(url);
 }
 function exportProductsCSV(){
-  const header = ['SKU','Name','Category', ...LOCATIONS.map(l=>l.name+' qty'), 'Total qty','Reorder level','Status'];
+  const header = ['SKU','Name','Category', ...LOCATIONS.map(l=>l.name+' qty'), ${low.slice(0,6).map(p=>{ const lowLocs = lowLocationsFor(p); return `<li class="py-2.5 flex items-center justify-between gap-3"><div class="min-w-0"><div class="text-sm font-medium text-slate-800 truncate">${esc(p.name)}</div><div class="text-[11px] text-slate-400">${esc(p.sku||'No SKU')}</div></div><div class="shrink-0 flex flex-col items-end gap-1">${lowLocs.map(l=>`<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 num">${esc(l.code)}: ${fmtNum(qtyAt(p,l.id))} / ${fmtNum(reorderLevelAt(p,l.id))}</span>`).join('')}</div></li>`;}).join('')}
   const rows = [...state.products].sort(byName).map(p=>[
     p.sku||'', p.name, p.category||'', ...LOCATIONS.map(l=>qtyAt(p,l.id)), productTotalQty(p),
-    p.reorderLevel, isLowStock(p)?'Low stock':'In stock'
+    'Total qty', ...LOCATIONS.map(l=>l.name+' reorder level'), 'Status'];
   ]);
   downloadCSV('items_' + todayStr() + '.csv', header, rows);
 }
