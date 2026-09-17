@@ -94,7 +94,7 @@
 /* =====================================================================
    STATE
 ===================================================================== */
-const state = { products: [], movements: [], profiles: [] };
+const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [] };
 const LOCATIONS = [
   { id:'loc-ho',  name:'Head Office',  code:'HO',  color:'#6366f1' },
   { id:'loc-apt', name:'Apollo Tower', code:'APT', color:'#10b981' },
@@ -107,6 +107,7 @@ const ui = {
   tab: 'dashboard',
   productsFilter: { search:'', category:'' },
   movementsFilter: { search:'', type:'', locationId:'', dateFrom:'', dateTo:'' },
+  assetsFilter: { search:'', locationId:'', department:'' },
   sidebarOpen: false,
 };
 
@@ -178,6 +179,34 @@ async function deleteMovementDoc(id){
     catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
   }
 }
+async function persistAssetDoc(asset){
+  await setJSON('assets', state.assets);
+  if(firestoreAssetsRef){
+    try{ await firestoreAssetsRef.doc(asset.id).set(asset); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function deleteAssetDoc(id){
+  await setJSON('assets', state.assets);
+  if(firestoreAssetsRef){
+    try{ await firestoreAssetsRef.doc(id).delete(); }
+    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function persistAssetTransferDoc(t){
+  await setJSON('assetTransfers', state.assetTransfers);
+  if(firestoreAssetTransfersRef){
+    try{ await firestoreAssetTransfersRef.doc(t.id).set(t); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function deleteAssetTransferDoc(id){
+  await setJSON('assetTransfers', state.assetTransfers);
+  if(firestoreAssetTransfersRef){
+    try{ await firestoreAssetTransfersRef.doc(id).delete(); }
+    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+  }
+}
 
 let storageDown = false;
 function markStorageDown(reason){
@@ -225,10 +254,14 @@ function isAllowedEmail(email){
 let firestoreDb = null;
 let firestoreItemsRef = null;
 let firestoreMovementsRef = null;
+let firestoreAssetsRef = null;
+let firestoreAssetTransfersRef = null;
 let firestoreProfilesRef = null;
 let firebaseAuth = null;
 let itemsUnsub = null;
 let movementsUnsub = null;
+let assetsUnsub = null;
+let assetTransfersUnsub = null;
 let profileUnsub = null;
 let allProfilesUnsub = null;
 let pendingSignupExtra = null;
@@ -286,8 +319,12 @@ function parseFirebaseConfigInput(text){
 function clearLocalDataCache(){
   state.products = [];
   state.movements = [];
+  state.assets = [];
+  state.assetTransfers = [];
   localStorage.removeItem(STORAGE_PREFIX+'products');
   localStorage.removeItem(STORAGE_PREFIX+'movements');
+  localStorage.removeItem(STORAGE_PREFIX+'assets');
+  localStorage.removeItem(STORAGE_PREFIX+'assetTransfers');
 }
 
 async function initCloudIfConfigured(){
@@ -314,18 +351,24 @@ async function initCloudIfConfigured(){
         cloudStatus = 'synced';
         firestoreItemsRef = firestoreDb.collection('fdc_inventory_items');
         firestoreMovementsRef = firestoreDb.collection('fdc_inventory_movements');
+        firestoreAssetsRef = firestoreDb.collection('fdc_inventory_assets');
+        firestoreAssetTransfersRef = firestoreDb.collection('fdc_inventory_asset_transfers');
         listenToCloudItems();
         listenToCloudMovements();
+        listenToCloudAssets();
+        listenToCloudAssetTransfers();
         ensureOwnProfileDoc(user, pendingExtra);
         listenToOwnProfile(user);
       } else {
         authUser = null;
         if(itemsUnsub){ itemsUnsub(); itemsUnsub = null; }
         if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
+        if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
+        if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
         if(profileUnsub){ profileUnsub(); profileUnsub = null; }
         if(allProfilesUnsub){ allProfilesUnsub(); allProfilesUnsub = null; }
         state.profiles = [];
-        firestoreItemsRef = null; firestoreMovementsRef = null;
+        firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null;
         clearLocalDataCache();
         cloudStatus = 'synced';
       }
@@ -377,13 +420,39 @@ function listenToCloudMovements(){
     renderApp();
   });
 }
+function listenToCloudAssets(){
+  if(assetsUnsub) assetsUnsub();
+  assetsUnsub = firestoreAssetsRef.onSnapshot(snap=>{
+    state.assets = snap.docs.map(d=>d.data());
+    localStorage.setItem(STORAGE_PREFIX+'assets', JSON.stringify(state.assets));
+    renderApp();
+  }, err=>{
+    cloudStatus = 'error';
+    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
+    renderApp();
+  });
+}
+function listenToCloudAssetTransfers(){
+  if(assetTransfersUnsub) assetTransfersUnsub();
+  assetTransfersUnsub = firestoreAssetTransfersRef.onSnapshot(snap=>{
+    state.assetTransfers = snap.docs.map(d=>d.data());
+    localStorage.setItem(STORAGE_PREFIX+'assetTransfers', JSON.stringify(state.assetTransfers));
+    renderApp();
+  }, err=>{
+    cloudStatus = 'error';
+    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
+    renderApp();
+  });
+}
 function disconnectCloud(){
   confirmAction('Disconnect cloud sync? Your data will stay saved in this browser only from now on.', async ()=>{
     setCloudConfig(null);
     if(itemsUnsub){ itemsUnsub(); itemsUnsub = null; }
     if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
+    if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
+    if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
     if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
     closeModal();
     toast('Cloud sync disconnected.');
     renderApp();
@@ -682,7 +751,9 @@ async function saveCloudConfig(){
     toast('Connecting…');
     if(itemsUnsub){ itemsUnsub(); itemsUnsub = null; }
     if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firebaseAuth = null; authUser = null;
+    if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
+    if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firebaseAuth = null; authUser = null;
     await initCloudIfConfigured();
   }catch(e){
     errEl.textContent = e.message; errEl.classList.remove('hidden');
@@ -725,6 +796,7 @@ const ICONS = {
   products:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 6.2 10 2.5l7.5 3.7v7.6L10 17.5l-7.5-3.7z"/><path d="M2.5 6.2 10 9.9l7.5-3.7"/><path d="M10 9.9v7.6"/></svg>',
   levels:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 5.5 10 2.5l7.5 3v.01L10 8.5l-7.5-3z"/><path d="m2.5 10 7.5 3 7.5-3M2.5 14.3 10 17.3l7.5-3"/></svg>',
   movements:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12.5 8 8l3 3 5-5.5"/><path d="M12.5 5h3.5v3.5"/><path d="M3 17h14"/></svg>',
+  assets:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 18s6-5.5 6-10a6 6 0 10-12 0c0 4.5 6 10 6 10z"/><circle cx="10" cy="8" r="2.2"/></svg>',
   admin:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2.5 16.5 5v5c0 4-2.8 6.5-6.5 7.5-3.7-1-6.5-3.5-6.5-7.5V5z"/><path d="m7.2 10 1.8 1.8 3.8-3.8"/></svg>',
 };
 const NAV_BASE = [
@@ -732,6 +804,7 @@ const NAV_BASE = [
   { id:'products', label:'Items', icon:'products' },
   { id:'levels', label:'Stock Levels', icon:'levels' },
   { id:'movements', label:'Stock Movements', icon:'movements' },
+  { id:'assets', label:'Assets', icon:'assets' },
 ];
 function currentNav(){
   return (authUser && authUser.role==='admin') ? [...NAV_BASE, { id:'admin', label:'Admin Panel', icon:'admin' }] : NAV_BASE;
@@ -795,12 +868,16 @@ function confirmAction(message, onYes){
    INIT
 ===================================================================== */
 async function init(){
-  const [products, movements] = await Promise.all([
+  const [products, movements, assets, assetTransfers] = await Promise.all([
     getJSON('products', []),
     getJSON('movements', []),
+    getJSON('assets', []),
+    getJSON('assetTransfers', []),
   ]);
   state.products = products || [];
   state.movements = movements || [];
+  state.assets = assets || [];
+  state.assetTransfers = assetTransfers || [];
   const cfg = getCloudConfig();
   if(cfg) cloudStatus = 'connecting'; // avoid a flash of the app before we know sign-in state
   renderApp();
@@ -835,6 +912,7 @@ function render(){
     else if(ui.tab==='products') el.innerHTML = viewProducts();
     else if(ui.tab==='levels') el.innerHTML = viewStockLevels();
     else if(ui.tab==='movements') el.innerHTML = viewMovements();
+    else if(ui.tab==='assets') el.innerHTML = viewAssets();
     else if(ui.tab==='admin') el.innerHTML = viewAdmin();
   }catch(e){
     console.error(e);
@@ -1619,6 +1697,330 @@ function deleteMovement(id){
 }
 
 /* =====================================================================
+   VIEW: ASSETS
+===================================================================== */
+function getAsset(id){ return state.assets.find(a=>a.id===id); }
+function assetLocationTotals(locId){ return state.assets.filter(a=>a.locationId===locId).length; }
+function getFilteredAssets(){
+  const f = ui.assetsFilter;
+  let list = [...state.assets];
+  if(f.locationId) list = list.filter(a=>a.locationId===f.locationId);
+  if(f.department){
+    const q = f.department.toLowerCase();
+    list = list.filter(a=>(a.department||'').toLowerCase().includes(q));
+  }
+  if(f.search){
+    const q = f.search.toLowerCase();
+    list = list.filter(a=> (a.name+' '+(a.tag||'')+' '+(a.assignedTo||'')).toLowerCase().includes(q));
+  }
+  return list;
+}
+function hasActiveAssetFilters(){
+  const f = ui.assetsFilter;
+  return !!(f.search || f.locationId || f.department);
+}
+function clearAssetFilters(){
+  ui.assetsFilter = { search:'', locationId:'', department:'' };
+  rerenderMain();
+}
+function assetStatusBadge(status){
+  return status==='retired'
+    ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold">Retired</span>'
+    : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">Active</span>';
+}
+function viewAssets(){
+  const f = ui.assetsFilter;
+  const list = getFilteredAssets().sort(byName);
+  const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
+
+  const rows = list.map(a=>{
+    const loc = getLocation(a.locationId);
+    return `
+      <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+        <td class="px-5 sm:px-6 py-3">
+          <div class="font-semibold text-slate-800">${esc(a.name)}</div>
+          <div class="text-[11.5px] text-slate-400">${esc(a.tag||'No tag')}${a.category?(' · '+esc(a.category)):''}</div>
+        </td>
+        <td class="py-3">${loc ? locTag(loc.id) : '<span class="text-slate-400">—</span>'}</td>
+        <td class="py-3 text-slate-600">${esc(a.department||'—')}</td>
+        <td class="py-3 text-slate-600">${esc(a.assignedTo||'—')}</td>
+        <td class="py-3">${assetStatusBadge(a.status)}</td>
+        <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+          <button onclick="openTransferForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Transfer</button>
+          <button onclick="openAssetForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
+          <button onclick="deleteAsset('${a.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  const recentTransfers = [...state.assetTransfers].sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,8);
+
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Assets</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Equipment and assets assigned across your locations.</p>
+      </div>
+      <div class="flex gap-2.5">
+        <button onclick="exportAssetsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
+        <button onclick="openAssetForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Add Asset</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      ${LOCATIONS.map(l=>`
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${l.color}"></span>
+            <span class="text-sm font-bold text-slate-900 truncate">${esc(l.name)}</span>
+            <span class="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(l.code)}</span>
+          </div>
+          <div class="text-[26px] font-extrabold text-slate-900 num">${fmtNum(assetLocationTotals(l.id))}</div>
+          <div class="text-[11.5px] text-slate-400">Assets assigned</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="flex flex-wrap gap-2.5 mb-4">
+      <input type="text" placeholder="Search by name, tag or assignee…" value="${esc(f.search)}" oninput="ui.assetsFilter.search=this.value; rerenderMain();"
+        class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <select onchange="ui.assetsFilter.locationId=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <option value="">All locations</option>${locOptions}
+      </select>
+      <input type="text" placeholder="Department" value="${esc(f.department)}" oninput="ui.assetsFilter.department=this.value; rerenderMain();"
+        class="w-40 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      ${hasActiveAssetFilters() ? `<button onclick="clearAssetFilters()" class="text-xs font-semibold text-brand-600 hover:underline self-center">Clear filters</button>` : ''}
+      <span class="self-center text-xs text-slate-400 ml-auto">${list.length} asset${list.length===1?'':'s'}</span>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Asset</th>
+            <th class="py-3 font-semibold">Location</th>
+            <th class="py-3 font-semibold">Department</th>
+            <th class="py-3 font-semibold">Assigned to</th>
+            <th class="py-3 font-semibold">Status</th>
+            <th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No assets ${hasActiveAssetFilters()?'match these filters':'yet'}</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">${hasActiveAssetFilters()?'Try clearing a filter.':'Add an asset to start tracking equipment by location.'}</p>
+        ${hasActiveAssetFilters() ? '' : `<button onclick="openAssetForm()" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">+ Add Asset</button>`}
+      </div>`}
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 sm:px-6 py-4 border-b border-slate-100">
+        <div class="text-sm font-bold text-slate-900">Recent transfers</div>
+      </div>
+      ${recentTransfers.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-2.5 font-semibold">Date</th><th class="py-2.5 font-semibold">Asset</th><th class="py-2.5 font-semibold">From</th><th class="py-2.5 font-semibold">To</th><th class="py-2.5 font-semibold">Department</th><th class="py-2.5 font-semibold">Handled by</th>
+          </tr></thead>
+          <tbody>${recentTransfers.map(t=>{
+            const a = getAsset(t.assetId);
+            return `
+            <tr class="border-b border-slate-100 last:border-0">
+              <td class="px-5 sm:px-6 py-2.5 text-slate-500">${fmtDate(t.date)}</td>
+              <td class="py-2.5 text-slate-700">${a?esc(a.name):'<span class="text-slate-400">Deleted asset</span>'}</td>
+              <td class="py-2.5">${locTag(t.fromLocationId)}</td>
+              <td class="py-2.5">${locTag(t.toLocationId)}</td>
+              <td class="py-2.5 text-slate-600">${esc(t.toDepartment||'—')}</td>
+              <td class="py-2.5 text-slate-500">${esc(t.handledByName||'—')}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>` : `<div class="text-center py-10 text-sm text-slate-400">No transfers logged yet.</div>`}
+    </div>
+  `;
+}
+
+function openAssetForm(id){
+  const editing = id ? getAsset(id) : null;
+  const body = `
+    <div id="af-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Asset name *</label>
+      <input type="text" id="af-name" value="${editing?esc(editing.name):''}" placeholder="e.g. Dell Laptop" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Asset tag / serial</label>
+        <input type="text" id="af-tag" value="${editing?esc(editing.tag||''):''}" placeholder="Optional" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Category</label>
+        <input type="text" id="af-category" value="${editing?esc(editing.category||''):''}" placeholder="e.g. IT Equipment" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
+        <select id="af-location" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${LOCATIONS.map(l=>`<option value="${l.id}" ${editing&&editing.locationId===l.id?'selected':''}>${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
+        <input type="text" id="af-department" value="${editing?esc(editing.department||''):''}" placeholder="e.g. Operations" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Assigned to</label>
+        <input type="text" id="af-assignedto" value="${editing?esc(editing.assignedTo||''):''}" placeholder="Person's name" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
+        <select id="af-status" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="active" ${!editing||editing.status!=='retired'?'selected':''}>Active</option>
+          <option value="retired" ${editing&&editing.status==='retired'?'selected':''}>Retired</option>
+        </select>
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Notes</label>
+      <input type="text" id="af-notes" value="${editing?esc(editing.notes||''):''}" placeholder="Optional" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveAsset('${editing?editing.id:''}')">${editing?'Save changes':'Add asset'}</button>
+    </div>
+  `;
+  openModal(editing?'Edit asset':'Add asset', body, true);
+}
+function saveAsset(id){
+  const errEl = document.getElementById('af-error');
+  errEl.classList.add('hidden');
+  const name = document.getElementById('af-name').value.trim();
+  const locationId = document.getElementById('af-location').value;
+  if(!name){ errEl.textContent='Asset name is required.'; errEl.classList.remove('hidden'); return; }
+  if(!locationId){ errEl.textContent='Choose a location.'; errEl.classList.remove('hidden'); return; }
+  const data = {
+    name,
+    tag: document.getElementById('af-tag').value.trim(),
+    category: document.getElementById('af-category').value.trim(),
+    locationId,
+    department: document.getElementById('af-department').value.trim(),
+    assignedTo: document.getElementById('af-assignedto').value.trim(),
+    status: document.getElementById('af-status').value,
+    notes: document.getElementById('af-notes').value.trim(),
+  };
+  let saved;
+  if(id){
+    saved = getAsset(id);
+    Object.assign(saved, data);
+  } else {
+    saved = { id: uid(), ...data, createdAt: nowISO() };
+    state.assets.push(saved);
+  }
+  persistAssetDoc(saved);
+  closeModal();
+  toast(id ? 'Asset updated.' : 'Asset added.');
+  rerenderMain();
+}
+function deleteAsset(id){
+  confirmAction('Delete this asset and its transfer history? This cannot be undone.', async ()=>{
+    const transfersToDelete = state.assetTransfers.filter(t=>t.assetId===id);
+    state.assets = state.assets.filter(a=>a.id!==id);
+    state.assetTransfers = state.assetTransfers.filter(t=>t.assetId!==id);
+    await deleteAssetDoc(id);
+    for(const t of transfersToDelete){ await deleteAssetTransferDoc(t.id); }
+    toast('Asset deleted.');
+    rerenderMain();
+  });
+}
+
+function openTransferForm(assetId){
+  const asset = getAsset(assetId);
+  if(!asset) return;
+  const loc = getLocation(asset.locationId);
+  const body = `
+    <div id="tf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-4 text-sm">
+      <div class="font-semibold text-slate-800">${esc(asset.name)}</div>
+      <div class="text-[11.5px] text-slate-400">${esc(asset.tag||'No tag')}</div>
+    </div>
+    <div class="bg-slate-50 rounded-lg px-3.5 py-2.5 mb-4 text-xs text-slate-500">
+      Currently at <span class="font-semibold text-slate-700">${loc?esc(loc.name):'—'}</span>${asset.department?(' · '+esc(asset.department)):''}${asset.assignedTo?(' · '+esc(asset.assignedTo)):''}
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Transfer to location *</label>
+        <select id="tf-location" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${LOCATIONS.map(l=>`<option value="${l.id}" ${asset.locationId===l.id?'selected':''}>${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">New department</label>
+        <input type="text" id="tf-department" value="${esc(asset.department||'')}" placeholder="e.g. Operations" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">New assignee</label>
+        <input type="text" id="tf-assignedto" value="${esc(asset.assignedTo||'')}" placeholder="Person's name" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
+        <input type="date" id="tf-date" value="${todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / notes</label>
+      <input type="text" id="tf-reason" placeholder="e.g. Reassigned to new department" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveTransfer('${assetId}')">Log transfer</button>
+    </div>
+  `;
+  openModal('Transfer / Handover', body);
+}
+function saveTransfer(assetId){
+  const errEl = document.getElementById('tf-error');
+  errEl.classList.add('hidden');
+  const asset = getAsset(assetId);
+  if(!asset){ errEl.textContent='Asset not found.'; errEl.classList.remove('hidden'); return; }
+  const toLocationId = document.getElementById('tf-location').value;
+  const toDepartment = document.getElementById('tf-department').value.trim();
+  const toAssignedTo = document.getElementById('tf-assignedto').value.trim();
+  const date = document.getElementById('tf-date').value;
+  const reason = document.getElementById('tf-reason').value.trim();
+  const toLoc = getLocation(toLocationId);
+  if(!toLoc){ errEl.textContent='Choose a destination location.'; errEl.classList.remove('hidden'); return; }
+  if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
+
+  const transfer = {
+    id: uid(),
+    assetId,
+    fromLocationId: asset.locationId, toLocationId,
+    fromDepartment: asset.department||'', toDepartment,
+    fromAssignedTo: asset.assignedTo||'', toAssignedTo,
+    date, reason, createdAt: nowISO(),
+    handledByName: authUser ? authUser.name : null,
+    handledByEmail: authUser ? authUser.email : null,
+  };
+  asset.locationId = toLocationId;
+  asset.department = toDepartment;
+  asset.assignedTo = toAssignedTo;
+  state.assetTransfers.push(transfer);
+  persistAssetDoc(asset);
+  persistAssetTransferDoc(transfer);
+  closeModal();
+  toast('Transfer logged.');
+  rerenderMain();
+}
+
+/* =====================================================================
    CSV EXPORT
 ===================================================================== */
 function csvCell(v){
@@ -1656,6 +2058,15 @@ function exportMovementsCSV(){
   if(rows.length===0){ toast('No movements match the current filters — nothing to export.', true); return; }
   const rangePart = (f.dateFrom || f.dateTo) ? `_${f.dateFrom||'start'}_to_${f.dateTo||'now'}` : '_' + todayStr();
   downloadCSV('stock_movements' + rangePart + '.csv', header, rows);
+}
+function exportAssetsCSV(){
+  const header = ['Tag','Name','Category','Location','Department','Assigned to','Status','Notes'];
+  const rows = [...state.assets].sort(byName).map(a=>{
+    const loc = getLocation(a.locationId);
+    return [a.tag||'', a.name, a.category||'', loc?loc.name:'', a.department||'', a.assignedTo||'', a.status==='retired'?'Retired':'Active', a.notes||''];
+  });
+  if(rows.length===0){ toast('No assets to export.', true); return; }
+  downloadCSV('assets_' + todayStr() + '.csv', header, rows);
 }
 
 
