@@ -395,6 +395,21 @@ function listenToOwnProfile(user){
   }, err=>{ /* profile is a nice-to-have on top of auth; a failure here shouldn't block the app */ });
 }
 async function ensureOwnProfileDoc(user, extra){ if(!firestoreProfilesRef || !firestoreDb) return; try{ let assignedRole = null; const metaRef = firestoreDb.collection('fdc_inventory_meta').doc('adminStatus'); await firestoreDb.runTransaction(async (tx) => { const ref = firestoreProfilesRef.doc(user.uid); const snap = await tx.get(ref); if(snap.exists) return; const metaSnap = await tx.get(metaRef); const alreadyHasAdmin = metaSnap.exists && metaSnap.data().assigned; const role = alreadyHasAdmin ? 'member' : 'admin'; const data = Object.assign({ uid:user.uid, email:user.email, name:user.displayName||user.email, role, designation:'', department:'', createdAt: Date.now() }, extra||{}); tx.set(ref, data); if(!alreadyHasAdmin) tx.set(metaRef, { assigned:true }); assignedRole = role; }); if(assignedRole && authUser && authUser.uid===user.uid){ authUser.role = assignedRole; renderApp(); } }catch(e){ } }
+let lastCloudErrorToastAt = 0;
+function handleCloudSyncError(err, collectionLabel){
+  cloudStatus = 'error';
+  const isPermissionDenied = err && (err.code === 'permission-denied' || (err.message||'').toLowerCase().includes('permission'));
+  const now = Date.now();
+  if(now - lastCloudErrorToastAt > 4000){
+    lastCloudErrorToastAt = now;
+    if(isPermissionDenied){
+      toast('Cloud sync blocked by Firestore rules for ' + collectionLabel + ' — changes are still saving to this browser. Check Firestore Database → Rules covers this collection.', true);
+    } else {
+      toast('Cloud sync connection lost — changes are still saving to this browser.', true);
+    }
+  }
+  renderApp();
+}
 function listenToCloudItems(){
   if(itemsUnsub) itemsUnsub();
   itemsUnsub = firestoreItemsRef.onSnapshot(snap=>{
@@ -402,11 +417,7 @@ function listenToCloudItems(){
     state.products = snap.docs.map(d=>d.data());
     localStorage.setItem(STORAGE_PREFIX+'products', JSON.stringify(state.products));
     renderApp();
-  }, err=>{
-    cloudStatus = 'error';
-    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
-    renderApp();
-  });
+  }, err=> handleCloudSyncError(err, 'items'));
 }
 function listenToCloudMovements(){
   if(movementsUnsub) movementsUnsub();
@@ -414,11 +425,7 @@ function listenToCloudMovements(){
     state.movements = snap.docs.map(d=>d.data());
     localStorage.setItem(STORAGE_PREFIX+'movements', JSON.stringify(state.movements));
     renderApp();
-  }, err=>{
-    cloudStatus = 'error';
-    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
-    renderApp();
-  });
+  }, err=> handleCloudSyncError(err, 'stock movements'));
 }
 function listenToCloudAssets(){
   if(assetsUnsub) assetsUnsub();
@@ -426,11 +433,7 @@ function listenToCloudAssets(){
     state.assets = snap.docs.map(d=>d.data());
     localStorage.setItem(STORAGE_PREFIX+'assets', JSON.stringify(state.assets));
     renderApp();
-  }, err=>{
-    cloudStatus = 'error';
-    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
-    renderApp();
-  });
+  }, err=> handleCloudSyncError(err, 'assets'));
 }
 function listenToCloudAssetTransfers(){
   if(assetTransfersUnsub) assetTransfersUnsub();
@@ -438,11 +441,7 @@ function listenToCloudAssetTransfers(){
     state.assetTransfers = snap.docs.map(d=>d.data());
     localStorage.setItem(STORAGE_PREFIX+'assetTransfers', JSON.stringify(state.assetTransfers));
     renderApp();
-  }, err=>{
-    cloudStatus = 'error';
-    toast('Cloud sync connection lost — changes are still saving to this browser.', true);
-    renderApp();
-  });
+  }, err=> handleCloudSyncError(err, 'asset transfers'));
 }
 function disconnectCloud(){
   confirmAction('Disconnect cloud sync? Your data will stay saved in this browser only from now on.', async ()=>{
@@ -1559,7 +1558,8 @@ function filterMovementProducts(clearSelection){
   const dropdown = document.getElementById('mf-product-dropdown');
   if(!input || !dropdown) return;
   if(clearSelection) document.getElementById('mf-product').value = '';
-  dropdown.innerHTML = movementProductOptionsHtml(input.value);
+  const query = clearSelection ? input.value : '';
+  dropdown.innerHTML = movementProductOptionsHtml(query);
   dropdown.classList.remove('hidden');
 }
 function selectMovementProduct(id){
@@ -1587,7 +1587,7 @@ function openMovementForm(type){
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
         <input type="text" id="mf-product-search" autocomplete="off" placeholder="Search by name or SKU…"
           value="${esc(defaultProduct.name + (defaultProduct.sku?(' — '+defaultProduct.sku):''))}"
-          oninput="filterMovementProducts(true)" onfocus="filterMovementProducts(false)" onblur="hideMovementProductDropdown()"
+          oninput="filterMovementProducts(true)" onfocus="this.select(); filterMovementProducts(false);" onblur="hideMovementProductDropdown()"
           class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
         <input type="hidden" id="mf-product" value="${defaultProduct.id}">
         <div id="mf-product-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
@@ -1739,7 +1739,7 @@ function viewAssets(){
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
           <div class="font-semibold text-slate-800">${esc(a.name)}</div>
-          <div class="text-[11.5px] text-slate-400">${esc(a.tag||'No tag')}${a.category?(' · '+esc(a.category)):''}</div>
+          <div class="text-[11.5px] text-slate-400">${esc(a.tag||'No tag')}${a.serialNumber?(' · SN '+esc(a.serialNumber)):''}${a.category?(' · '+esc(a.category)):''}</div>
         </td>
         <td class="py-3">${loc ? locTag(loc.id) : '<span class="text-slate-400">—</span>'}</td>
         <td class="py-3 text-slate-600">${esc(a.department||'—')}</td>
@@ -1853,38 +1853,42 @@ function openAssetForm(id){
     </div>
     <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Asset tag / serial</label>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Asset tag</label>
         <input type="text" id="af-tag" value="${editing?esc(editing.tag||''):''}" placeholder="Optional" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Serial number</label>
+        <input type="text" id="af-serial" value="${editing?esc(editing.serialNumber||''):''}" placeholder="Optional" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Category</label>
         <input type="text" id="af-category" value="${editing?esc(editing.category||''):''}" placeholder="e.g. IT Equipment" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
-    </div>
-    <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
         <select id="af-location" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
           ${LOCATIONS.map(l=>`<option value="${l.id}" ${editing&&editing.locationId===l.id?'selected':''}>${esc(l.name)} (${esc(l.code)})</option>`).join('')}
         </select>
       </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
         <input type="text" id="af-department" value="${editing?esc(editing.department||''):''}" placeholder="e.g. Operations" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
-    </div>
-    <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Assigned to</label>
         <input type="text" id="af-assignedto" value="${editing?esc(editing.assignedTo||''):''}" placeholder="Person's name" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
-        <select id="af-status" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
-          <option value="active" ${!editing||editing.status!=='retired'?'selected':''}>Active</option>
-          <option value="retired" ${editing&&editing.status==='retired'?'selected':''}>Retired</option>
-        </select>
-      </div>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
+      <select id="af-status" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <option value="active" ${!editing||editing.status!=='retired'?'selected':''}>Active</option>
+        <option value="retired" ${editing&&editing.status==='retired'?'selected':''}>Retired</option>
+      </select>
     </div>
     <div class="mb-5">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Notes</label>
@@ -1907,6 +1911,7 @@ function saveAsset(id){
   const data = {
     name,
     tag: document.getElementById('af-tag').value.trim(),
+    serialNumber: document.getElementById('af-serial').value.trim(),
     category: document.getElementById('af-category').value.trim(),
     locationId,
     department: document.getElementById('af-department').value.trim(),
@@ -1947,7 +1952,7 @@ function openTransferForm(assetId){
     <div id="tf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
     <div class="mb-4 text-sm">
       <div class="font-semibold text-slate-800">${esc(asset.name)}</div>
-      <div class="text-[11.5px] text-slate-400">${esc(asset.tag||'No tag')}</div>
+      <div class="text-[11.5px] text-slate-400">${esc(asset.tag||'No tag')}${asset.serialNumber?(' · SN '+esc(asset.serialNumber)):''}</div>
     </div>
     <div class="bg-slate-50 rounded-lg px-3.5 py-2.5 mb-4 text-xs text-slate-500">
       Currently at <span class="font-semibold text-slate-700">${loc?esc(loc.name):'—'}</span>${asset.department?(' · '+esc(asset.department)):''}${asset.assignedTo?(' · '+esc(asset.assignedTo)):''}
@@ -2060,10 +2065,10 @@ function exportMovementsCSV(){
   downloadCSV('stock_movements' + rangePart + '.csv', header, rows);
 }
 function exportAssetsCSV(){
-  const header = ['Tag','Name','Category','Location','Department','Assigned to','Status','Notes'];
+  const header = ['Tag','Serial Number','Name','Category','Location','Department','Assigned to','Status','Notes'];
   const rows = [...state.assets].sort(byName).map(a=>{
     const loc = getLocation(a.locationId);
-    return [a.tag||'', a.name, a.category||'', loc?loc.name:'', a.department||'', a.assignedTo||'', a.status==='retired'?'Retired':'Active', a.notes||''];
+    return [a.tag||'', a.serialNumber||'', a.name, a.category||'', loc?loc.name:'', a.department||'', a.assignedTo||'', a.status==='retired'?'Retired':'Active', a.notes||''];
   });
   if(rows.length===0){ toast('No assets to export.', true); return; }
   downloadCSV('assets_' + todayStr() + '.csv', header, rows);
