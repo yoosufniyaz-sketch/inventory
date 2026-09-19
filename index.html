@@ -95,12 +95,13 @@
    STATE
 ===================================================================== */
 const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [] };
-const LOCATIONS = [
+const DEFAULT_LOCATIONS = [
   { id:'loc-ho',  name:'Head Office',  code:'HO',  color:'#6366f1' },
   { id:'loc-apt', name:'Apollo Tower', code:'APT', color:'#10b981' },
   { id:'loc-t15', name:'T-15',         code:'T15', color:'#f59e0b' },
   { id:'loc-t13', name:'T-13',         code:'T13', color:'#ec4899' },
 ];
+let LOCATIONS = DEFAULT_LOCATIONS.map(l=>({...l}));
 function getLocation(id){ return LOCATIONS.find(l=>l.id===id); }
 
 const ui = {
@@ -108,6 +109,7 @@ const ui = {
   productsFilter: { search:'', category:'' },
   movementsFilter: { search:'', type:'', locationId:'', dateFrom:'', dateTo:'' },
   assetsFilter: { search:'', locationId:'', department:'' },
+  selectedAssetId: null,
   sidebarOpen: false,
 };
 
@@ -262,6 +264,7 @@ let itemsUnsub = null;
 let movementsUnsub = null;
 let assetsUnsub = null;
 let assetTransfersUnsub = null;
+let locationsUnsub = null;
 let profileUnsub = null;
 let allProfilesUnsub = null;
 let pendingSignupExtra = null;
@@ -321,10 +324,12 @@ function clearLocalDataCache(){
   state.movements = [];
   state.assets = [];
   state.assetTransfers = [];
+  LOCATIONS = DEFAULT_LOCATIONS.map(l=>({...l}));
   localStorage.removeItem(STORAGE_PREFIX+'products');
   localStorage.removeItem(STORAGE_PREFIX+'movements');
   localStorage.removeItem(STORAGE_PREFIX+'assets');
   localStorage.removeItem(STORAGE_PREFIX+'assetTransfers');
+  localStorage.removeItem(STORAGE_PREFIX+'locations');
 }
 
 async function initCloudIfConfigured(){
@@ -357,6 +362,7 @@ async function initCloudIfConfigured(){
         listenToCloudMovements();
         listenToCloudAssets();
         listenToCloudAssetTransfers();
+        listenToCloudLocations();
         ensureOwnProfileDoc(user, pendingExtra);
         listenToOwnProfile(user);
       } else {
@@ -365,6 +371,7 @@ async function initCloudIfConfigured(){
         if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
         if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
         if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
+        if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
         if(profileUnsub){ profileUnsub(); profileUnsub = null; }
         if(allProfilesUnsub){ allProfilesUnsub(); allProfilesUnsub = null; }
         state.profiles = [];
@@ -443,6 +450,23 @@ function listenToCloudAssetTransfers(){
     renderApp();
   }, err=> handleCloudSyncError(err, 'asset transfers'));
 }
+function listenToCloudLocations(){
+  if(locationsUnsub) locationsUnsub();
+  locationsUnsub = firestoreDb.collection('fdc_inventory_meta').doc('locations').onSnapshot(doc=>{
+    if(doc.exists && Array.isArray(doc.data().list) && doc.data().list.length){
+      LOCATIONS = doc.data().list;
+      localStorage.setItem(STORAGE_PREFIX+'locations', JSON.stringify(LOCATIONS));
+      renderApp();
+    }
+  }, err=> handleCloudSyncError(err, 'locations'));
+}
+async function persistLocations(){
+  localStorage.setItem(STORAGE_PREFIX+'locations', JSON.stringify(LOCATIONS));
+  if(firestoreDb){
+    try{ await firestoreDb.collection('fdc_inventory_meta').doc('locations').set({ list: LOCATIONS }); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
 function disconnectCloud(){
   confirmAction('Disconnect cloud sync? Your data will stay saved in this browser only from now on.', async ()=>{
     setCloudConfig(null);
@@ -450,6 +474,7 @@ function disconnectCloud(){
     if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
     if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
+    if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
     if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
     firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
     closeModal();
@@ -812,7 +837,7 @@ function currentNav(){
 function renderNav(){
   document.getElementById('nav-list').innerHTML = currentNav().map(n=>`
     <a href="#" onclick="goTo('${n.id}');return false;"
-       class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors ${ui.tab===n.id ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
+       class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors ${(ui.tab===n.id || (n.id==='assets' && ui.tab==='asset-detail')) ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
       ${ICONS[n.icon]}<span>${n.label}</span>
     </a>
   `).join('');
@@ -867,16 +892,18 @@ function confirmAction(message, onYes){
    INIT
 ===================================================================== */
 async function init(){
-  const [products, movements, assets, assetTransfers] = await Promise.all([
+  const [products, movements, assets, assetTransfers, locations] = await Promise.all([
     getJSON('products', []),
     getJSON('movements', []),
     getJSON('assets', []),
     getJSON('assetTransfers', []),
+    getJSON('locations', null),
   ]);
   state.products = products || [];
   state.movements = movements || [];
   state.assets = assets || [];
   state.assetTransfers = assetTransfers || [];
+  if(Array.isArray(locations) && locations.length) LOCATIONS = locations;
   const cfg = getCloudConfig();
   if(cfg) cloudStatus = 'connecting'; // avoid a flash of the app before we know sign-in state
   renderApp();
@@ -912,6 +939,7 @@ function render(){
     else if(ui.tab==='levels') el.innerHTML = viewStockLevels();
     else if(ui.tab==='movements') el.innerHTML = viewMovements();
     else if(ui.tab==='assets') el.innerHTML = viewAssets();
+    else if(ui.tab==='asset-detail') el.innerHTML = viewAssetDetail();
     else if(ui.tab==='admin') el.innerHTML = viewAdmin();
   }catch(e){
     console.error(e);
@@ -927,7 +955,16 @@ init();
 ===================================================================== */
 function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; }
 function productTotalQty(p){ return LOCATIONS.reduce((sum,l)=> sum + qtyAt(p, l.id), 0); }
-function isLowStock(p){ return p.reorderLevel!=null && productTotalQty(p) <= p.reorderLevel; }
+function reorderLevelAt(p, locId){ return (p.reorderLevels && p.reorderLevels[locId]!=null) ? p.reorderLevels[locId] : null; }
+function hasPerLocationReorder(p){ return !!(p.reorderLevels && LOCATIONS.some(l=> p.reorderLevels[l.id]!=null)); }
+function lowStockLocations(p){
+  if(!hasPerLocationReorder(p)) return [];
+  return LOCATIONS.filter(l=> reorderLevelAt(p,l.id)!=null && qtyAt(p,l.id) <= reorderLevelAt(p,l.id));
+}
+function isLowStock(p){
+  if(hasPerLocationReorder(p)) return lowStockLocations(p).length > 0;
+  return p.reorderLevel!=null && productTotalQty(p) <= p.reorderLevel;
+}
 function totalUnits(){ return state.products.reduce((s,p)=>s+productTotalQty(p), 0); }
 function lowStockProducts(){ return state.products.filter(isLowStock); }
 function locationTotalUnits(locId){ return state.products.reduce((s,p)=>s+qtyAt(p, locId), 0); }
@@ -1016,7 +1053,7 @@ function viewDashboard(){
                 <div class="text-sm font-medium text-slate-800 truncate">${esc(p.name)}</div>
                 <div class="text-[11px] text-slate-400">${esc(p.sku||'No SKU')}</div>
               </div>
-              <span class="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 num">${fmtNum(productTotalQty(p))} / ${fmtNum(p.reorderLevel)}</span>
+              <span class="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 num">${hasPerLocationReorder(p) ? esc(lowStockLocations(p).map(l=>l.code).join(', ')) : fmtNum(productTotalQty(p))+' / '+fmtNum(p.reorderLevel)}</span>
             </li>
           `).join('')}
         </ul>
@@ -1064,7 +1101,9 @@ function viewStockLevels(){
     const low = isLowStock(p);
     const cells = LOCATIONS.map(l=>{
       const q = qtyAt(p, l.id);
-      return `<td class="py-3 text-right num">${q ? fmtNum(q) : '<span class="text-slate-300">—</span>'}</td>`;
+      const rl = reorderLevelAt(p, l.id);
+      const cellLow = rl!=null && q <= rl;
+      return `<td class="py-3 text-right num${cellLow?' text-amber-700 font-semibold':''}">${q ? fmtNum(q) : '<span class="text-slate-300">—</span>'}${cellLow?' <span class="text-[10px] align-top">●</span>':''}</td>`;
     }).join('');
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
@@ -1099,7 +1138,7 @@ function viewStockLevels(){
       </div>` : `
       <div class="text-center py-16 px-6">
         <h3 class="text-base font-semibold text-slate-800 mb-1">No items yet</h3>
-        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">Add items to see stock levels across all 4 locations.</p>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">Add items to see stock levels across all ${LOCATIONS.length} location${LOCATIONS.length===1?'':'s'}.</p>
       </div>`}
     </div>
   `;
@@ -1114,7 +1153,7 @@ function viewProducts(){
   if(f.category) list = list.filter(p=>(p.category||'')===f.category);
   if(f.search){
     const q = f.search.toLowerCase();
-    list = list.filter(p=> (p.name+' '+(p.sku||'')).toLowerCase().includes(q));
+    list = list.filter(p=> (p.name+' '+(p.sku||'')+' '+(p.description||'')).toLowerCase().includes(q));
   }
   list.sort(byName);
 
@@ -1125,13 +1164,13 @@ function viewProducts(){
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
-          <div class="font-semibold text-slate-800">${esc(p.name)}</div>
+          <div class="font-semibold text-slate-800"${p.description?(' title="'+esc(p.description)+'"'):''}>${esc(p.name)}</div>
           <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
         </td>
         <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">${esc(p.category||'Uncategorized')}</span></td>
         <td class="py-3 text-right num">${fmtNum(productTotalQty(p))}</td>
-        <td class="py-3 text-right num">${fmtNum(p.reorderLevel)}</td>
-        <td class="py-3 text-center">${low ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Low stock</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}</td>
+        <td class="py-3 text-right num">${hasPerLocationReorder(p) ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-semibold">Per location</span>' : fmtNum(p.reorderLevel)}</td>
+        <td class="py-3 text-center">${low ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold"'+(hasPerLocationReorder(p)?(' title="Low at '+lowStockLocations(p).map(l=>esc(l.code)).join(', ')+'"'):'')+'>Low stock</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}</td>
         <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
           <button onclick="openProductForm('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
           <button onclick="deleteProduct('${p.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
@@ -1152,7 +1191,7 @@ function viewProducts(){
     </div>
 
     <div class="flex flex-wrap gap-2.5 mb-4">
-      <input type="text" placeholder="Search by name or SKU…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
+      <input type="text" placeholder="Search by name, SKU or description…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
         class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       <select onchange="ui.productsFilter.category=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
         <option value="">All categories</option>${catOptions}
@@ -1193,6 +1232,10 @@ function openProductForm(id){
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item name *</label>
       <input type="text" id="pf-name" value="${editing?esc(editing.name):''}" placeholder="e.g. Wireless Mouse" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
     </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
+      <textarea id="pf-description" rows="2" placeholder="Optional — brief details about this item" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.description||''):''}</textarea>
+    </div>
     <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">SKU</label>
@@ -1217,8 +1260,28 @@ function openProductForm(id){
       <div class="text-[11px] text-slate-400 mt-1.5">Use Stock Movements to log day-to-day changes at a location.</div>
     </div>
     <div class="mb-4">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reorder level (total across locations)</label>
-      <input type="number" min="0" step="any" id="pf-reorder" value="${editing&&editing.reorderLevel!=null?editing.reorderLevel:'0'}" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <div class="flex items-center justify-between mb-1.5">
+        <label class="block text-xs font-semibold text-slate-600">Reorder level</label>
+        <label class="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 cursor-pointer">
+          <input type="checkbox" id="pf-reorder-perloc-toggle" ${editing&&hasPerLocationReorder(editing)?'checked':''} onchange="togglePerLocationReorder()">
+          Set per location
+        </label>
+      </div>
+      <div id="pf-reorder-total-wrap" class="${editing&&hasPerLocationReorder(editing)?'hidden':''}">
+        <input type="number" min="0" step="any" id="pf-reorder" value="${editing&&editing.reorderLevel!=null?editing.reorderLevel:'0'}" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <div class="text-[11px] text-slate-400 mt-1.5">Flags this item as low stock once the total across all locations falls to or below this number.</div>
+      </div>
+      <div id="pf-reorder-perloc-wrap" class="${editing&&hasPerLocationReorder(editing)?'':'hidden'}">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          ${LOCATIONS.map(l=>`
+            <div>
+              <label class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 mb-1"><span class="w-2 h-2 rounded-full shrink-0" style="background:${l.color}"></span>${esc(l.code)}</label>
+              <input type="number" min="0" step="any" id="pf-reorder-${l.id}" value="${editing?(reorderLevelAt(editing,l.id)!=null?reorderLevelAt(editing,l.id):''):''}" placeholder="—" class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+            </div>
+          `).join('')}
+        </div>
+        <div class="text-[11px] text-slate-400 mt-1.5">Flags this item as low stock once any location's own quantity falls to or below that location's threshold. Leave a location blank to skip it.</div>
+      </div>
     </div>
     <div class="flex justify-end gap-2.5">
       <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
@@ -1226,6 +1289,11 @@ function openProductForm(id){
     </div>
   `;
   openModal(editing?'Edit item':'Add item', body, true);
+}
+function togglePerLocationReorder(){
+  const perLoc = document.getElementById('pf-reorder-perloc-toggle').checked;
+  document.getElementById('pf-reorder-total-wrap').classList.toggle('hidden', perLoc);
+  document.getElementById('pf-reorder-perloc-wrap').classList.toggle('hidden', !perLoc);
 }
 
 function saveProduct(id){
@@ -1235,12 +1303,22 @@ function saveProduct(id){
   if(!name){ errEl.textContent='Item name is required.'; errEl.classList.remove('hidden'); return; }
   const stock = {};
   LOCATIONS.forEach(l=>{ stock[l.id] = Number(document.getElementById('pf-qty-'+l.id).value) || 0; });
+  const perLoc = document.getElementById('pf-reorder-perloc-toggle').checked;
+  const reorderLevels = {};
+  if(perLoc){
+    LOCATIONS.forEach(l=>{
+      const raw = document.getElementById('pf-reorder-'+l.id).value;
+      if(raw !== '') reorderLevels[l.id] = Number(raw) || 0;
+    });
+  }
   const data = {
     name,
+    description: document.getElementById('pf-description').value.trim(),
     sku: document.getElementById('pf-sku').value.trim(),
     category: document.getElementById('pf-category').value.trim(),
     stock,
     reorderLevel: Number(document.getElementById('pf-reorder').value) || 0,
+    reorderLevels,
   };
   let savedProduct;
   if(id){
@@ -1298,11 +1376,16 @@ function movementRow(m, compact){
       <td class="py-3 text-slate-700">${p?esc(p.name):'<span class="text-slate-400">Deleted item</span>'}</td>
       <td class="py-3">${locTag(m.locationId)}</td>
       <td class="py-3 text-right num font-medium ${m.type==='in'?'text-emerald-600':'text-rose-600'}">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
+      <td class="py-3 text-slate-500">${acquisitionLabel(m)}</td>
       <td class="py-3 text-slate-500">${esc(m.reason||'—')}</td>
       <td class="py-3 text-slate-500">${issuedToLabel(m)}</td>
       <td class="py-3 text-slate-500">${esc(m.loggedByName||'—')}</td>
       <td class="py-3 pr-5 sm:pr-6 text-right"><button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button></td>
     </tr>`;
+}
+function acquisitionLabel(m){
+  if(m.type!=='in' || !m.acquisition) return '—';
+  return esc(m.acquisition);
 }
 function issuedToLabel(m){
   if(m.type!=='out' || (!m.staffName && !m.department)) return '—';
@@ -1321,7 +1404,7 @@ function getFilteredMovements(){
     const q = f.search.toLowerCase();
     list = list.filter(m=>{
       const p = getProduct(m.productId);
-      return ((p?p.name:'')+' '+(m.reason||'')+' '+(m.department||'')+' '+(m.staffName||'')).toLowerCase().includes(q);
+      return ((p?p.name:'')+' '+(m.reason||'')+' '+(m.acquisition||'')+' '+(m.department||'')+' '+(m.staffName||'')).toLowerCase().includes(q);
     });
   }
   return list;
@@ -1395,7 +1478,100 @@ function viewAdmin(){
         <p class="text-sm text-slate-500 max-w-sm mx-auto">If this doesn't update, make sure Firestore rules allow admins to read the fdc_inventory_profiles collection.</p>
       </div>`}
     </div>
+
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-4 mt-8">
+      <div>
+        <h2 class="text-lg font-extrabold text-slate-900 tracking-tight">Locations</h2>
+        <p class="text-sm text-slate-500 mt-0.5">Manage the sites you track stock and assets across.</p>
+      </div>
+      <button onclick="openLocationForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Add Location</button>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Location</th><th class="py-3 font-semibold">Code</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${LOCATIONS.map(l=>`
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-5 sm:px-6 py-3">
+                <div class="flex items-center gap-2.5">
+                  <span class="w-3 h-3 rounded-full shrink-0" style="background:${l.color}"></span>
+                  <span class="font-medium text-slate-800">${esc(l.name)}</span>
+                </div>
+              </td>
+              <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">${esc(l.code)}</span></td>
+              <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+                <button onclick="openLocationForm('${l.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
+                <button onclick="deleteLocation('${l.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
+              </td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>
   `;
+}
+function openLocationForm(id){
+  const editing = id ? getLocation(id) : null;
+  const body = `
+    <div id="lf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location name *</label>
+      <input type="text" id="lf-name" value="${editing?esc(editing.name):''}" placeholder="e.g. Warehouse 2" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-5">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Short code *</label>
+        <input type="text" id="lf-code" maxlength="6" value="${editing?esc(editing.code):''}" placeholder="e.g. WH2" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Color</label>
+        <input type="color" id="lf-color" value="${editing?esc(editing.color):'#6366f1'}" class="w-full h-[42px] px-1.5 py-1 rounded-lg border border-slate-300 cursor-pointer">
+      </div>
+    </div>
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveLocation('${editing?editing.id:''}')">${editing?'Save changes':'Add location'}</button>
+    </div>
+  `;
+  openModal(editing?'Edit location':'Add location', body);
+}
+function saveLocation(id){
+  const errEl = document.getElementById('lf-error');
+  errEl.classList.add('hidden');
+  const name = document.getElementById('lf-name').value.trim();
+  const code = document.getElementById('lf-code').value.trim().toUpperCase();
+  const color = document.getElementById('lf-color').value;
+  if(!name){ errEl.textContent='Location name is required.'; errEl.classList.remove('hidden'); return; }
+  if(!code){ errEl.textContent='Short code is required.'; errEl.classList.remove('hidden'); return; }
+  const dup = LOCATIONS.find(l=> l.code.toLowerCase()===code.toLowerCase() && l.id!==id);
+  if(dup){ errEl.textContent='That code is already used by ' + dup.name + '.'; errEl.classList.remove('hidden'); return; }
+  if(id){
+    const loc = getLocation(id);
+    loc.name = name; loc.code = code; loc.color = color;
+  } else {
+    LOCATIONS.push({ id: uid(), name, code, color });
+  }
+  persistLocations();
+  closeModal();
+  toast(id ? 'Location updated.' : 'Location added.');
+  rerenderMain();
+}
+function deleteLocation(id){
+  if(LOCATIONS.length <= 1){ toast('At least one location is required.', true); return; }
+  const loc = getLocation(id);
+  if(!loc) return;
+  const hasStock = state.products.some(p=> qtyAt(p, id) > 0);
+  const hasAssets = state.assets.some(a=> a.locationId === id);
+  const warning = (hasStock || hasAssets)
+    ? `Delete "${loc.name}"? It still has ${hasStock?'stock':''}${hasStock&&hasAssets?' and ':''}${hasAssets?'assets':''} recorded against it — those records will remain but this location will no longer appear as an option.`
+    : `Delete "${loc.name}"? This cannot be undone.`;
+  confirmAction(warning, ()=>{
+    LOCATIONS = LOCATIONS.filter(l=>l.id!==id);
+    persistLocations();
+    toast('Location deleted.');
+    rerenderMain();
+  });
 }
 function openEditUserModal(uid){
   const p = state.profiles.find(x=>x.uid===uid);
@@ -1526,7 +1702,7 @@ function viewMovements(){
         <table class="w-full text-sm">
           <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold">Location</th>
-            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Reason / reference</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Acquisition</th><th class="py-3 font-semibold">Reason / reference</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
           <tbody>${list.map(m=>movementRow(m,false)).join('')}</tbody>
         </table>
@@ -1610,6 +1786,16 @@ function openMovementForm(type){
         <input type="date" id="mf-date" value="${todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
     </div>
+    ${isIn ? `
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Acquisition *</label>
+      <select id="mf-acquisition" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <option value="">Select…</option>
+        <option value="Purchase Requisition">Purchase Requisition</option>
+        <option value="CSR">CSR</option>
+        <option value="Petty Cash">Petty Cash</option>
+      </select>
+    </div>` : ''}
     <div class="mb-5">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / reference</label>
       <input type="text" id="mf-reason" placeholder="${isIn?'e.g. Restock from supplier':'e.g. Sold to customer, damaged'}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
@@ -1649,6 +1835,7 @@ function saveMovement(type){
   const qty = Number(document.getElementById('mf-qty').value);
   const date = document.getElementById('mf-date').value;
   const reason = document.getElementById('mf-reason').value.trim();
+  const acquisition = type==='in' ? document.getElementById('mf-acquisition').value : '';
   const department = type==='out' ? document.getElementById('mf-department').value.trim() : '';
   const staffName = type==='out' ? document.getElementById('mf-staffname').value.trim() : '';
   const p = getProduct(productId);
@@ -1658,6 +1845,7 @@ function saveMovement(type){
   if(!loc) { errEl.textContent='Choose a location.'; errEl.classList.remove('hidden'); return; }
   if(!qty || qty<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
   if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
+  if(type==='in' && !acquisition){ errEl.textContent='Choose how this stock was acquired.'; errEl.classList.remove('hidden'); return; }
   const currentAtLoc = qtyAt(p, locationId);
   if(type==='out' && qty > currentAtLoc){
     errEl.textContent = `Only ${fmtNum(currentAtLoc)} in stock at ${loc.name} — reduce the quantity or log a Stock In first.`;
@@ -1668,7 +1856,7 @@ function saveMovement(type){
   if(!p.stock) p.stock = {};
   p.stock[locationId] = type==='in' ? currentAtLoc + qty : currentAtLoc - qty;
   const newMovement = {
-    id: uid(), type, productId, locationId, quantity: qty, date, reason, department, staffName, createdAt: nowISO(),
+    id: uid(), type, productId, locationId, quantity: qty, date, reason, acquisition, department, staffName, createdAt: nowISO(),
     loggedByName: authUser ? authUser.name : null,
     loggedByEmail: authUser ? authUser.email : null,
   };
@@ -1738,7 +1926,7 @@ function viewAssets(){
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
-          <div class="font-semibold text-slate-800">${esc(a.name)}</div>
+          <button onclick="openAssetDetail('${a.id}')" class="font-semibold text-slate-800 hover:text-brand-600 hover:underline text-left">${esc(a.name)}</button>
           <div class="text-[11.5px] text-slate-400">${esc(a.tag||'No tag')}${a.serialNumber?(' · SN '+esc(a.serialNumber)):''}${a.category?(' · '+esc(a.category)):''}</div>
         </td>
         <td class="py-3">${loc ? locTag(loc.id) : '<span class="text-slate-400">—</span>'}</td>
@@ -1746,6 +1934,7 @@ function viewAssets(){
         <td class="py-3 text-slate-600">${esc(a.assignedTo||'—')}</td>
         <td class="py-3">${assetStatusBadge(a.status)}</td>
         <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+          <button onclick="openAssetDetail('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Details</button>
           <button onclick="openTransferForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Transfer</button>
           <button onclick="openAssetForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
           <button onclick="deleteAsset('${a.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
@@ -1839,6 +2028,99 @@ function viewAssets(){
           }).join('')}</tbody>
         </table>
       </div>` : `<div class="text-center py-10 text-sm text-slate-400">No transfers logged yet.</div>`}
+    </div>
+  `;
+}
+
+function openAssetDetail(id){
+  ui.selectedAssetId = id;
+  ui.tab = 'asset-detail';
+  toggleSidebar(false);
+  render();
+  window.scrollTo(0,0);
+}
+function viewAssetDetail(){
+  const asset = getAsset(ui.selectedAssetId);
+  if(!asset){
+    return `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">Asset not found</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">This asset may have been deleted.</p>
+        <button onclick="goTo('assets')" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">← Back to Assets</button>
+      </div>`;
+  }
+  const loc = getLocation(asset.locationId);
+  const history = [...state.assetTransfers].filter(t=>t.assetId===asset.id).sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt));
+
+  return `
+    <button onclick="goTo('assets')" class="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline mb-4">← Back to Assets</button>
+
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <div class="flex items-center gap-2.5 mb-1 flex-wrap">
+          <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">${esc(asset.name)}</h1>
+          ${assetStatusBadge(asset.status)}
+        </div>
+        <p class="text-sm text-slate-500">${esc(asset.tag||'No tag')}${asset.serialNumber?(' · SN '+esc(asset.serialNumber)):''}${asset.category?(' · '+esc(asset.category)):''}</p>
+      </div>
+      <div class="flex gap-2.5">
+        <button onclick="openTransferForm('${asset.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Transfer</button>
+        <button onclick="openAssetForm('${asset.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">Edit</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Location</div>
+        <div class="text-sm font-bold text-slate-900 mt-1">${loc?esc(loc.name):'—'}</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Department</div>
+        <div class="text-sm font-bold text-slate-900 mt-1">${esc(asset.department||'—')}</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Assigned to</div>
+        <div class="text-sm font-bold text-slate-900 mt-1">${esc(asset.assignedTo||'—')}</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Added</div>
+        <div class="text-sm font-bold text-slate-900 mt-1">${asset.createdAt?fmtDate(asset.createdAt.slice(0,10)):'—'}</div>
+      </div>
+    </div>
+
+    ${asset.notes ? `
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
+      <div class="text-sm font-bold text-slate-900 mb-2">Notes</div>
+      <p class="text-sm text-slate-600 whitespace-pre-wrap">${esc(asset.notes)}</p>
+    </div>` : ''}
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
+      <div class="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="text-sm font-bold text-slate-900">Transfer history</div>
+        <span class="text-xs text-slate-400">${history.length} record${history.length===1?'':'s'}</span>
+      </div>
+      ${history.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-2.5 font-semibold">Date</th><th class="py-2.5 font-semibold">From</th><th class="py-2.5 font-semibold">To</th><th class="py-2.5 font-semibold">Department</th><th class="py-2.5 font-semibold">Assignee</th><th class="py-2.5 font-semibold">Reason</th><th class="py-2.5 pr-5 sm:pr-6 font-semibold">Handled by</th>
+          </tr></thead>
+          <tbody>${history.map(t=>`
+            <tr class="border-b border-slate-100 last:border-0">
+              <td class="px-5 sm:px-6 py-2.5 text-slate-500">${fmtDate(t.date)}</td>
+              <td class="py-2.5">${locTag(t.fromLocationId)}</td>
+              <td class="py-2.5">${locTag(t.toLocationId)}</td>
+              <td class="py-2.5 text-slate-600">${esc(t.toDepartment||'—')}</td>
+              <td class="py-2.5 text-slate-600">${esc(t.toAssignedTo||'—')}</td>
+              <td class="py-2.5 text-slate-500">${esc(t.reason||'—')}</td>
+              <td class="py-2.5 pr-5 sm:pr-6 text-slate-500">${esc(t.handledByName||'—')}</td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>` : `<div class="text-center py-10 text-sm text-slate-400">No transfers logged for this asset yet.</div>`}
+    </div>
+
+    <div class="flex justify-end">
+      <button onclick="deleteAsset('${asset.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete this asset</button>
     </div>
   `;
 }
@@ -2045,20 +2327,20 @@ function downloadCSV(filename, header, rows){
   URL.revokeObjectURL(url);
 }
 function exportProductsCSV(){
-  const header = ['SKU','Name','Category', ...LOCATIONS.map(l=>l.name+' qty'), 'Total qty','Reorder level','Status'];
+  const header = ['SKU','Name','Description','Category', ...LOCATIONS.map(l=>l.name+' qty'), 'Total qty','Reorder level (total)', ...LOCATIONS.map(l=>l.name+' reorder level'), 'Status'];
   const rows = [...state.products].sort(byName).map(p=>[
-    p.sku||'', p.name, p.category||'', ...LOCATIONS.map(l=>qtyAt(p,l.id)), productTotalQty(p),
-    p.reorderLevel, isLowStock(p)?'Low stock':'In stock'
+    p.sku||'', p.name, p.description||'', p.category||'', ...LOCATIONS.map(l=>qtyAt(p,l.id)), productTotalQty(p),
+    p.reorderLevel, ...LOCATIONS.map(l=>{ const rl = reorderLevelAt(p,l.id); return rl!=null?rl:''; }), isLowStock(p)?'Low stock':'In stock'
   ]);
   downloadCSV('items_' + todayStr() + '.csv', header, rows);
 }
 function exportMovementsCSV(){
   const f = ui.movementsFilter;
-  const header = ['Date','Type','Item','SKU','Location','Quantity','Reason / reference','Department','Staff name','Logged by'];
+  const header = ['Date','Type','Item','SKU','Location','Quantity','Acquisition','Reason / reference','Department','Staff name','Logged by'];
   const rows = getFilteredMovements().sort((a,b)=>a.date.localeCompare(b.date)).map(m=>{
     const p = getProduct(m.productId);
     const loc = getLocation(m.locationId);
-    return [m.date, m.type==='in'?'Stock In':'Stock Out', p?p.name:'', p?p.sku||'':'', loc?loc.name:'', m.quantity, m.reason||'', m.department||'', m.staffName||'', m.loggedByName||''];
+    return [m.date, m.type==='in'?'Stock In':'Stock Out', p?p.name:'', p?p.sku||'':'', loc?loc.name:'', m.quantity, m.acquisition||'', m.reason||'', m.department||'', m.staffName||'', m.loggedByName||''];
   });
   if(rows.length===0){ toast('No movements match the current filters — nothing to export.', true); return; }
   const rangePart = (f.dateFrom || f.dateTo) ? `_${f.dateFrom||'start'}_to_${f.dateTo||'now'}` : '_' + todayStr();
