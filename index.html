@@ -949,6 +949,11 @@ function renderApp(){
 }
 
 function render(){
+  const activeEl = document.activeElement;
+  const activeId = (activeEl && activeEl.id && el_contains_main(activeEl)) ? activeEl.id : null;
+  const selStart = (activeId && typeof activeEl.selectionStart === 'number') ? activeEl.selectionStart : null;
+  const selEnd = (activeId && typeof activeEl.selectionEnd === 'number') ? activeEl.selectionEnd : null;
+
   renderNav();
   renderSidebarFoot();
   const el = document.getElementById('main-inner');
@@ -966,7 +971,20 @@ function render(){
     console.error(e);
     el.innerHTML = `<div class="text-center py-16 text-slate-500"><h3 class="text-base font-semibold text-slate-800 mb-1">Something went wrong</h3><p class="text-sm">${esc(e.message)}</p></div>`;
   }
+  if(activeId){
+    const newEl = document.getElementById(activeId);
+    if(newEl && typeof newEl.focus === 'function'){
+      newEl.focus();
+      if(selStart !== null && typeof newEl.setSelectionRange === 'function'){
+        try{ newEl.setSelectionRange(selStart, selEnd); }catch(err){}
+      }
+    }
+  }
   syncStickyOffsets();
+}
+function el_contains_main(node){
+  const main = document.getElementById('main-inner');
+  return !!(main && node && main.contains(node));
 }
 function syncStickyOffsets(){
   requestAnimationFrame(()=>{
@@ -1042,10 +1060,6 @@ function viewDashboard(){
       <div>
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Dashboard</h1>
         <p class="text-sm text-slate-500 mt-0.5">An overview of your inventory.</p>
-      </div>
-      <div class="flex gap-2.5">
-        <button onclick="goTo('movements'); setTimeout(()=>openMovementForm('in'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
-        <button onclick="goTo('movements'); setTimeout(()=>openMovementForm('out'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
       </div>
     </div>
 
@@ -1292,7 +1306,7 @@ function viewProducts(){
     </div>
 
     <div class="sticky-toolbar flex flex-wrap gap-2.5 mb-4">
-      <input type="text" placeholder="Search by name, variant, SKU or description…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
+      <input type="text" id="products-search-input" placeholder="Search by name, variant, SKU or description…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
         class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       <select onchange="ui.productsFilter.category=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
         <option value="">All categories</option>${catOptions}
@@ -1805,7 +1819,7 @@ function viewMovements(){
 
     <div class="sticky-toolbar sticky-toolbar-card bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
       <div class="flex flex-wrap gap-2.5">
-        <input type="text" placeholder="Search by item, reason, staff or department…" value="${esc(f.search)}" oninput="ui.movementsFilter.search=this.value; rerenderMain();"
+        <input type="text" id="movements-search-input" placeholder="Search by item, reason, staff or department…" value="${esc(f.search)}" oninput="ui.movementsFilter.search=this.value; rerenderMain();"
           class="flex-1 min-w-[180px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
         <select onchange="ui.movementsFilter.type=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
           <option value="">All types</option>
@@ -2080,8 +2094,13 @@ function viewAssets(){
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
-          <button onclick="openAssetDetail('${a.id}')" class="font-semibold text-slate-800 hover:text-brand-600 hover:underline text-left">${esc(a.name)}</button>
-          <div class="text-[11.5px] text-slate-400">${esc(a.tag||'No tag')}${a.serialNumber?(' · SN '+esc(a.serialNumber)):''}${a.category?(' · '+esc(a.category)):''}</div>
+          <div class="flex items-center gap-3">
+            ${a.image ? `<img src="${a.image}" alt="" class="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0">` : `<div class="w-9 h-9 rounded-lg bg-slate-100 shrink-0"></div>`}
+            <div class="min-w-0">
+              <button onclick="openAssetDetail('${a.id}')" class="font-semibold text-slate-800 hover:text-brand-600 hover:underline text-left">${esc(a.name)}</button>
+              <div class="text-[11.5px] text-slate-400">${esc(a.tag||'No tag')}${a.serialNumber?(' · SN '+esc(a.serialNumber)):''}${a.category?(' · '+esc(a.category)):''}</div>
+            </div>
+          </div>
         </td>
         <td class="py-3">${loc ? locTag(loc.id) : '<span class="text-slate-400">—</span>'}</td>
         <td class="py-3 text-slate-600">${esc(a.department||'—')}</td>
@@ -2125,12 +2144,12 @@ function viewAssets(){
     </div>
 
     <div class="sticky-toolbar flex flex-wrap gap-2.5 mb-4">
-      <input type="text" placeholder="Search by name, tag or assignee…" value="${esc(f.search)}" oninput="ui.assetsFilter.search=this.value; rerenderMain();"
+      <input type="text" id="assets-search-input" placeholder="Search by name, tag or assignee…" value="${esc(f.search)}" oninput="ui.assetsFilter.search=this.value; rerenderMain();"
         class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       <select onchange="ui.assetsFilter.locationId=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
         <option value="">All locations</option>${locOptions}
       </select>
-      <input type="text" placeholder="Department" value="${esc(f.department)}" oninput="ui.assetsFilter.department=this.value; rerenderMain();"
+      <input type="text" id="assets-department-input" placeholder="Department" value="${esc(f.department)}" oninput="ui.assetsFilter.department=this.value; rerenderMain();"
         class="w-40 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       ${hasActiveAssetFilters() ? `<button onclick="clearAssetFilters()" class="text-xs font-semibold text-brand-600 hover:underline self-center">Clear filters</button>` : ''}
       <span class="self-center text-xs text-slate-400 ml-auto">${list.length} asset${list.length===1?'':'s'}</span>
@@ -2243,7 +2262,7 @@ function viewAssetTransactions(){
 
     <div class="sticky-toolbar sticky-toolbar-card bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
       <div class="flex flex-wrap gap-2.5">
-        <input type="text" placeholder="Search by asset, department, assignee, reason or handler…" value="${esc(f.search)}" oninput="ui.assetTransactionsFilter.search=this.value; rerenderMain();"
+        <input type="text" id="asset-tx-search-input" placeholder="Search by asset, department, assignee, reason or handler…" value="${esc(f.search)}" oninput="ui.assetTransactionsFilter.search=this.value; rerenderMain();"
           class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
         <select onchange="ui.assetTransactionsFilter.locationId=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
           <option value="">All locations</option>${locOptions}
@@ -2323,12 +2342,15 @@ function viewAssetDetail(){
     <button onclick="goTo('assets')" class="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline mb-4">← Back to Assets</button>
 
     <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
-      <div>
-        <div class="flex items-center gap-2.5 mb-1 flex-wrap">
-          <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">${esc(asset.name)}</h1>
-          ${assetStatusBadge(asset.status)}
+      <div class="flex items-start gap-4">
+        ${asset.image ? `<img src="${asset.image}" alt="${esc(asset.name)}" class="w-20 h-20 rounded-xl object-cover border border-slate-200 shrink-0">` : ''}
+        <div>
+          <div class="flex items-center gap-2.5 mb-1 flex-wrap">
+            <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">${esc(asset.name)}</h1>
+            ${assetStatusBadge(asset.status)}
+          </div>
+          <p class="text-sm text-slate-500">${esc(asset.tag||'No tag')}${asset.serialNumber?(' · SN '+esc(asset.serialNumber)):''}${asset.category?(' · '+esc(asset.category)):''}</p>
         </div>
-        <p class="text-sm text-slate-500">${esc(asset.tag||'No tag')}${asset.serialNumber?(' · SN '+esc(asset.serialNumber)):''}${asset.category?(' · '+esc(asset.category)):''}</p>
       </div>
       <div class="flex gap-2.5">
         <button onclick="openTransferForm('${asset.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Transfer</button>
@@ -2392,6 +2414,47 @@ function viewAssetDetail(){
   `;
 }
 
+function handleAssetImageSelect(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please select an image file.', true); return; }
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const img = new Image();
+    img.onload = function(){
+      const maxDim = 480;
+      let w = img.width, h = img.height;
+      if(w > maxDim || h > maxDim){
+        if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; }
+        else { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+      const dataInput = document.getElementById('af-image-data');
+      const preview = document.getElementById('af-image-preview');
+      const removeBtn = document.getElementById('af-image-remove-btn');
+      if(dataInput) dataInput.value = dataUrl;
+      if(preview){ preview.src = dataUrl; preview.classList.remove('hidden'); }
+      if(removeBtn) removeBtn.classList.remove('hidden');
+    };
+    img.onerror = function(){ toast('Could not read that image — try a different file.', true); };
+    img.src = e.target.result;
+  };
+  reader.onerror = function(){ toast('Could not read that image — try a different file.', true); };
+  reader.readAsDataURL(file);
+}
+function removeAssetImage(){
+  const dataInput = document.getElementById('af-image-data');
+  const preview = document.getElementById('af-image-preview');
+  const removeBtn = document.getElementById('af-image-remove-btn');
+  const fileInput = document.getElementById('af-image-input');
+  if(dataInput) dataInput.value = '';
+  if(preview){ preview.src = ''; preview.classList.add('hidden'); }
+  if(removeBtn) removeBtn.classList.add('hidden');
+  if(fileInput) fileInput.value = '';
+}
 function openAssetForm(id){
   if(id && !canManageInventory()){ toast('Only admins can edit assets.', true); return; }
   const editing = id ? getAsset(id) : null;
@@ -2434,6 +2497,17 @@ function openAssetForm(id){
       </div>
     </div>
     <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Photo</label>
+      <div class="flex items-center gap-3">
+        <img id="af-image-preview" src="${editing&&editing.image?editing.image:''}" class="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-slate-50 ${editing&&editing.image?'':'hidden'}" alt="">
+        <div class="flex-1 min-w-0">
+          <input type="file" id="af-image-input" accept="image/*" onchange="handleAssetImageSelect(event)" class="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100">
+          <button type="button" id="af-image-remove-btn" onclick="removeAssetImage()" class="text-[11px] text-rose-600 hover:underline mt-1 ${editing&&editing.image?'':'hidden'}">Remove photo</button>
+        </div>
+      </div>
+      <input type="hidden" id="af-image-data" value="${editing&&editing.image?esc(editing.image):''}">
+    </div>
+    <div class="mb-4">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
       <select id="af-status" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
         <option value="active" ${!editing||editing.status!=='retired'?'selected':''}>Active</option>
@@ -2469,6 +2543,7 @@ function saveAsset(id){
     assignedTo: document.getElementById('af-assignedto').value.trim(),
     status: document.getElementById('af-status').value,
     notes: document.getElementById('af-notes').value.trim(),
+    image: document.getElementById('af-image-data').value || '',
   };
   let saved;
   if(id){
