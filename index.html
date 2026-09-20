@@ -36,8 +36,8 @@
   .sticky-thead th{ position: sticky; top: var(--tt, 3.5rem); z-index: 15; background: #fff; box-shadow: 0 1px 0 0 rgb(241 245 249); }
   @media (min-width: 1024px){ .sticky-thead th{ top: var(--ttlg, 0px); } }
   .sticky-thead-0{ --tt: 3.5rem; --ttlg: 0px; }
-  .sticky-thead-1{ --tt: 7rem; --ttlg: 2.75rem; }
-  .sticky-thead-2{ --tt: 11.5rem; --ttlg: 7rem; }
+  .sticky-thead-1{ --tt: 8rem; --ttlg: 3.75rem; }
+  .sticky-thead-2{ --tt: 12.5rem; --ttlg: 8rem; }
   @media print{
     .no-print{ display:none !important; }
     body{ background:#fff; }
@@ -969,7 +969,26 @@ function render(){
     console.error(e);
     el.innerHTML = `<div class="text-center py-16 text-slate-500"><h3 class="text-base font-semibold text-slate-800 mb-1">Something went wrong</h3><p class="text-sm">${esc(e.message)}</p></div>`;
   }
+  syncStickyOffsets();
 }
+function syncStickyOffsets(){
+  requestAnimationFrame(()=>{
+    const toolbar = document.querySelector('.sticky-toolbar');
+    const theads = document.querySelectorAll('.sticky-thead');
+    if(!theads.length) return;
+    const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+    const mobileHeaderH = isDesktop ? 0 : 56; // h-14 mobile top bar
+    const toolbarH = toolbar ? toolbar.getBoundingClientRect().height : 0;
+    const gap = 2; // small buffer so no sliver of the row underneath ever peeks through
+    const offsetLg = toolbarH + gap;
+    const offsetSm = mobileHeaderH + toolbarH + gap;
+    theads.forEach(t=>{
+      t.style.setProperty('--tt', offsetSm + 'px');
+      t.style.setProperty('--ttlg', offsetLg + 'px');
+    });
+  });
+}
+window.addEventListener('resize', ()=>{ if(document.querySelector('.sticky-thead')) syncStickyOffsets(); });
 function rerenderMain(){ render(); }
 
 init();
