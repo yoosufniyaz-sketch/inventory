@@ -33,11 +33,8 @@
   .sticky-toolbar{ position: sticky; top: 3.5rem; z-index: 20; background: #f1f5f9; padding-top: 0.5rem; margin-top: -0.5rem; }
   @media (min-width: 1024px){ .sticky-toolbar{ top: 0; } }
   .sticky-toolbar.sticky-toolbar-card{ background: #fff; padding-top: 1rem; margin-top: 0; }
-  .sticky-thead th{ position: sticky; top: var(--tt, 3.5rem); z-index: 15; background: #fff; box-shadow: 0 1px 0 0 rgb(241 245 249); }
-  @media (min-width: 1024px){ .sticky-thead th{ top: var(--ttlg, 0px); } }
-  .sticky-thead-0{ --tt: 3.5rem; --ttlg: 0px; }
-  .sticky-thead-1{ --tt: 8rem; --ttlg: 3.75rem; }
-  .sticky-thead-2{ --tt: 12.5rem; --ttlg: 8rem; }
+  .sticky-thead th{ position: sticky; top: 3.5rem; z-index: 15; background: #fff; box-shadow: 0 1px 0 0 rgb(241 245 249); }
+  @media (min-width: 1024px){ .sticky-thead th{ top: 0; } }
   @media print{
     .no-print{ display:none !important; }
     body{ background:#fff; }
@@ -973,22 +970,24 @@ function render(){
 }
 function syncStickyOffsets(){
   requestAnimationFrame(()=>{
-    const toolbar = document.querySelector('.sticky-toolbar');
+    const stackEls = [...document.querySelectorAll('.sticky-toolbar')];
     const theads = document.querySelectorAll('.sticky-thead');
-    if(!theads.length) return;
+    if(!stackEls.length && !theads.length) return;
     const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
     const mobileHeaderH = isDesktop ? 0 : 56; // h-14 mobile top bar
-    const toolbarH = toolbar ? toolbar.getBoundingClientRect().height : 0;
+    let cumulative = 0;
+    stackEls.forEach(el=>{
+      el.style.top = (isDesktop ? cumulative : mobileHeaderH + cumulative) + 'px';
+      cumulative += el.getBoundingClientRect().height;
+    });
     const gap = 2; // small buffer so no sliver of the row underneath ever peeks through
-    const offsetLg = toolbarH + gap;
-    const offsetSm = mobileHeaderH + toolbarH + gap;
+    const offsetPx = (isDesktop ? cumulative : mobileHeaderH + cumulative) + gap;
     theads.forEach(t=>{
-      t.style.setProperty('--tt', offsetSm + 'px');
-      t.style.setProperty('--ttlg', offsetLg + 'px');
+      [...t.children].forEach(th=>{ th.style.top = offsetPx + 'px'; });
     });
   });
 }
-window.addEventListener('resize', ()=>{ if(document.querySelector('.sticky-thead')) syncStickyOffsets(); });
+window.addEventListener('resize', ()=>{ if(document.querySelector('.sticky-toolbar, .sticky-thead')) syncStickyOffsets(); });
 function rerenderMain(){ render(); }
 
 init();
@@ -1160,7 +1159,7 @@ function viewStockLevels(){
   }).join('');
 
   return `
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+    <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Stock Levels</h1>
         <p class="text-sm text-slate-500 mt-0.5">Quantity on hand for every item, by location.</p>
@@ -1222,7 +1221,7 @@ function viewProducts(){
   }).join('');
 
   return `
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+    <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Items</h1>
         <p class="text-sm text-slate-500 mt-0.5">Your full item catalog.</p>
@@ -1733,7 +1732,7 @@ function viewMovements(){
   const acqOptions = ACQUISITION_TYPES.map(a=>`<option value="${esc(a)}" ${f.acquisition===a?'selected':''}>${esc(a)}</option>`).join('');
 
   return `
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+    <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Stock Movements</h1>
         <p class="text-sm text-slate-500 mt-0.5">Log stock coming in and going out, and generate a report for any period.</p>
@@ -2041,7 +2040,7 @@ function viewAssets(){
   const recentTransfers = [...state.assetTransfers].sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,8);
 
   return `
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+    <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Assets</h1>
         <p class="text-sm text-slate-500 mt-0.5">Equipment and assets assigned across your locations.</p>
@@ -2175,7 +2174,7 @@ function viewAssetTransactions(){
   }).join('');
 
   return `
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+    <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Asset Movements</h1>
         <p class="text-sm text-slate-500 mt-0.5">Every transfer and handover logged across your assets.</p>
