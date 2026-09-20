@@ -107,8 +107,9 @@ function getLocation(id){ return LOCATIONS.find(l=>l.id===id); }
 const ui = {
   tab: 'dashboard',
   productsFilter: { search:'', category:'' },
-  movementsFilter: { search:'', type:'', locationId:'', dateFrom:'', dateTo:'' },
+  movementsFilter: { search:'', type:'', locationId:'', acquisition:'', dateFrom:'', dateTo:'' },
   assetsFilter: { search:'', locationId:'', department:'' },
+  assetTransactionsFilter: { search:'', locationId:'', dateFrom:'', dateTo:'' },
   selectedAssetId: null,
   sidebarOpen: false,
 };
@@ -799,6 +800,8 @@ function fmtDate(d){
 }
 function fmtNum(n){ return (Number(n)||0).toLocaleString(undefined, { maximumFractionDigits:2 }); }
 function byName(a,b){ return (a.name||'').localeCompare(b.name||''); }
+function displayName(p){ return (p.variant||'').trim() ? p.name + ' (' + p.variant.trim() + ')' : p.name; }
+function byDisplayName(a,b){ return displayName(a).localeCompare(displayName(b)); }
 function getProduct(id){ return state.products.find(p=>p.id===id); }
 function distinctCategories(){
   return [...new Set(state.products.map(p=>(p.category||'').trim()).filter(Boolean))].sort();
@@ -821,17 +824,24 @@ const ICONS = {
   levels:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 5.5 10 2.5l7.5 3v.01L10 8.5l-7.5-3z"/><path d="m2.5 10 7.5 3 7.5-3M2.5 14.3 10 17.3l7.5-3"/></svg>',
   movements:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12.5 8 8l3 3 5-5.5"/><path d="M12.5 5h3.5v3.5"/><path d="M3 17h14"/></svg>',
   assets:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 18s6-5.5 6-10a6 6 0 10-12 0c0 4.5 6 10 6 10z"/><circle cx="10" cy="8" r="2.2"/></svg>',
+  assettx:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3 3 6l3 3"/><path d="M3 6h11a3 3 0 0 1 3 3v1"/><path d="M14 17l3-3-3-3"/><path d="M17 14H6a3 3 0 0 1-3-3v-1"/></svg>',
   admin:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2.5 16.5 5v5c0 4-2.8 6.5-6.5 7.5-3.7-1-6.5-3.5-6.5-7.5V5z"/><path d="m7.2 10 1.8 1.8 3.8-3.8"/></svg>',
+  locations:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 4.5 7 3l6 2 4.5-1.5v11L13 16l-6-2-4.5 1.5z"/><path d="M7 3v11M13 5v11"/></svg>',
 };
+function canManageInventory(){ return !authUser || authUser.role==='admin'; }
 const NAV_BASE = [
   { id:'dashboard', label:'Dashboard', icon:'dashboard' },
   { id:'products', label:'Items', icon:'products' },
   { id:'levels', label:'Stock Levels', icon:'levels' },
   { id:'movements', label:'Stock Movements', icon:'movements' },
   { id:'assets', label:'Assets', icon:'assets' },
+  { id:'asset-transactions', label:'Asset Movements', icon:'assettx' },
 ];
 function currentNav(){
-  return (authUser && authUser.role==='admin') ? [...NAV_BASE, { id:'admin', label:'Admin Panel', icon:'admin' }] : NAV_BASE;
+  const nav = [...NAV_BASE];
+  if(canManageInventory()) nav.push({ id:'locations', label:'Locations', icon:'locations' });
+  if(authUser && authUser.role==='admin') nav.push({ id:'admin', label:'Admin Panel', icon:'admin' });
+  return nav;
 }
 
 function renderNav(){
@@ -925,6 +935,7 @@ function renderApp(){
     authScreen.classList.remove('flex');
     appRoot.classList.remove('hidden');
     if(ui.tab==='admin' && !(authUser && authUser.role==='admin')) ui.tab = 'dashboard';
+    if(ui.tab==='locations' && !canManageInventory()) ui.tab = 'dashboard';
     render();
   }
 }
@@ -940,6 +951,8 @@ function render(){
     else if(ui.tab==='movements') el.innerHTML = viewMovements();
     else if(ui.tab==='assets') el.innerHTML = viewAssets();
     else if(ui.tab==='asset-detail') el.innerHTML = viewAssetDetail();
+    else if(ui.tab==='asset-transactions') el.innerHTML = viewAssetTransactions();
+    else if(ui.tab==='locations') el.innerHTML = viewLocations();
     else if(ui.tab==='admin') el.innerHTML = viewAdmin();
   }catch(e){
     console.error(e);
@@ -1050,7 +1063,7 @@ function viewDashboard(){
           ${low.slice(0,6).map(p=>`
             <li class="py-2.5 flex items-center justify-between gap-3">
               <div class="min-w-0">
-                <div class="text-sm font-medium text-slate-800 truncate">${esc(p.name)}</div>
+                <div class="text-sm font-medium text-slate-800 truncate">${esc(displayName(p))}</div>
                 <div class="text-[11px] text-slate-400">${esc(p.sku||'No SKU')}</div>
               </div>
               <span class="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 num">${hasPerLocationReorder(p) ? esc(lowStockLocations(p).map(l=>l.code).join(', ')) : fmtNum(productTotalQty(p))+' / '+fmtNum(p.reorderLevel)}</span>
@@ -1095,7 +1108,7 @@ function statCard(label, value, sub, color){
    VIEW: STOCK LEVELS
 ===================================================================== */
 function viewStockLevels(){
-  const list = [...state.products].sort(byName);
+  const list = [...state.products].sort(byDisplayName);
   const rows = list.map(p=>{
     const total = productTotalQty(p);
     const low = isLowStock(p);
@@ -1108,7 +1121,7 @@ function viewStockLevels(){
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
-          <div class="font-semibold text-slate-800">${esc(p.name)} ${low?'<span class="ml-1.5 inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold">Low</span>':''}</div>
+          <div class="font-semibold text-slate-800">${esc(displayName(p))} ${low?'<span class="ml-1.5 inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold">Low</span>':''}</div>
           <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}${p.category?(' · '+esc(p.category)):''}</div>
         </td>
         ${cells}
@@ -1153,9 +1166,9 @@ function viewProducts(){
   if(f.category) list = list.filter(p=>(p.category||'')===f.category);
   if(f.search){
     const q = f.search.toLowerCase();
-    list = list.filter(p=> (p.name+' '+(p.sku||'')+' '+(p.description||'')).toLowerCase().includes(q));
+    list = list.filter(p=> (p.name+' '+(p.variant||'')+' '+(p.sku||'')+' '+(p.description||'')).toLowerCase().includes(q));
   }
-  list.sort(byName);
+  list.sort(byDisplayName);
 
   const catOptions = distinctCategories().map(c=>`<option value="${esc(c)}" ${f.category===c?'selected':''}>${esc(c)}</option>`).join('');
 
@@ -1164,7 +1177,7 @@ function viewProducts(){
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
-          <div class="font-semibold text-slate-800"${p.description?(' title="'+esc(p.description)+'"'):''}>${esc(p.name)}</div>
+          <div class="font-semibold text-slate-800"${p.description?(' title="'+esc(p.description)+'"'):''}>${esc(displayName(p))}</div>
           <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
         </td>
         <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">${esc(p.category||'Uncategorized')}</span></td>
@@ -1173,7 +1186,7 @@ function viewProducts(){
         <td class="py-3 text-center">${low ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold"'+(hasPerLocationReorder(p)?(' title="Low at '+lowStockLocations(p).map(l=>esc(l.code)).join(', ')+'"'):'')+'>Low stock</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}</td>
         <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
           <button onclick="openProductForm('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
-          <button onclick="deleteProduct('${p.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
+          ${canManageInventory() ? `<button onclick="deleteProduct('${p.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}
         </td>
       </tr>`;
   }).join('');
@@ -1186,12 +1199,12 @@ function viewProducts(){
       </div>
       <div class="flex gap-2.5">
         <button onclick="exportProductsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
-        <button onclick="openProductForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Add Item</button>
+        ${canManageInventory() ? `<button onclick="openProductForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Add Item</button>` : ''}
       </div>
     </div>
 
     <div class="flex flex-wrap gap-2.5 mb-4">
-      <input type="text" placeholder="Search by name, SKU or description…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
+      <input type="text" placeholder="Search by name, variant, SKU or description…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
         class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       <select onchange="ui.productsFilter.category=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
         <option value="">All categories</option>${catOptions}
@@ -1216,22 +1229,30 @@ function viewProducts(){
       </div>` : `
       <div class="text-center py-16 px-6">
         <h3 class="text-base font-semibold text-slate-800 mb-1">No items yet</h3>
-        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">Add your first item — set its cost, price and reorder level so the dashboard can track it.</p>
-        <button onclick="openProductForm()" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">+ Add Item</button>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">${canManageInventory() ? 'Add your first item — set its cost, price and reorder level so the dashboard can track it.' : 'Ask an admin to add the first item.'}</p>
+        ${canManageInventory() ? `<button onclick="openProductForm()" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">+ Add Item</button>` : ''}
       </div>`}
     </div>
   `;
 }
 
 function openProductForm(id){
+  if(!id && !canManageInventory()){ toast('Only admins can add new items.', true); return; }
   const editing = id ? getProduct(id) : null;
   const catList = distinctCategories();
   const body = `
     <div id="pf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
-    <div class="mb-4">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item name *</label>
-      <input type="text" id="pf-name" value="${editing?esc(editing.name):''}" placeholder="e.g. Wireless Mouse" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    <div class="grid grid-cols-2 gap-4 mb-1.5">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item name *</label>
+        <input type="text" id="pf-name" value="${editing?esc(editing.name):''}" placeholder="e.g. Pen" oninput="updatePfNamePreview()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant</label>
+        <input type="text" id="pf-variant" value="${editing?esc(editing.variant||''):''}" placeholder="e.g. Ballpoint Blue" oninput="updatePfNamePreview()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
     </div>
+    <div class="text-[11px] text-slate-400 mb-4">Shown as: <span id="pf-name-preview" class="font-medium text-slate-500">${editing?esc(displayName(editing)):''}</span></div>
     <div class="mb-4">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
       <textarea id="pf-description" rows="2" placeholder="Optional — brief details about this item" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.description||''):''}</textarea>
@@ -1295,8 +1316,14 @@ function togglePerLocationReorder(){
   document.getElementById('pf-reorder-total-wrap').classList.toggle('hidden', perLoc);
   document.getElementById('pf-reorder-perloc-wrap').classList.toggle('hidden', !perLoc);
 }
+function updatePfNamePreview(){
+  const name = document.getElementById('pf-name').value.trim();
+  const variant = document.getElementById('pf-variant').value.trim();
+  document.getElementById('pf-name-preview').textContent = variant ? (name||'—') + ' (' + variant + ')' : (name||'—');
+}
 
 function saveProduct(id){
+  if(!id && !canManageInventory()){ toast('Only admins can add new items.', true); return; }
   const errEl = document.getElementById('pf-error');
   errEl.classList.add('hidden');
   const name = document.getElementById('pf-name').value.trim();
@@ -1313,6 +1340,7 @@ function saveProduct(id){
   }
   const data = {
     name,
+    variant: document.getElementById('pf-variant').value.trim(),
     description: document.getElementById('pf-description').value.trim(),
     sku: document.getElementById('pf-sku').value.trim(),
     category: document.getElementById('pf-category').value.trim(),
@@ -1335,6 +1363,7 @@ function saveProduct(id){
 }
 
 function deleteProduct(id){
+  if(!canManageInventory()){ toast('Only admins can delete items.', true); return; }
   confirmAction('Delete this item and its stock movement history? This cannot be undone.', async ()=>{
     const movementsToDelete = state.movements.filter(m=>m.productId===id);
     state.products = state.products.filter(p=>p.id!==id);
@@ -1364,7 +1393,7 @@ function movementRow(m, compact){
       <tr class="border-b border-slate-100 last:border-0">
         <td class="px-5 sm:px-6 py-2.5 text-slate-500">${fmtDate(m.date)}</td>
         <td class="py-2.5">${badge}</td>
-        <td class="py-2.5 text-slate-700">${p?esc(p.name):'<span class="text-slate-400">Deleted item</span>'}</td>
+        <td class="py-2.5 text-slate-700">${p?esc(displayName(p)):'<span class="text-slate-400">Deleted item</span>'}</td>
         <td class="py-2.5">${locTag(m.locationId)}</td>
         <td class="py-2.5 pr-5 sm:pr-6 text-right num font-medium">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
       </tr>`;
@@ -1373,14 +1402,14 @@ function movementRow(m, compact){
     <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
       <td class="px-5 sm:px-6 py-3 text-slate-500">${fmtDate(m.date)}</td>
       <td class="py-3">${badge}</td>
-      <td class="py-3 text-slate-700">${p?esc(p.name):'<span class="text-slate-400">Deleted item</span>'}</td>
+      <td class="py-3 text-slate-700">${p?esc(displayName(p)):'<span class="text-slate-400">Deleted item</span>'}</td>
       <td class="py-3">${locTag(m.locationId)}</td>
       <td class="py-3 text-right num font-medium ${m.type==='in'?'text-emerald-600':'text-rose-600'}">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
       <td class="py-3 text-slate-500">${acquisitionLabel(m)}</td>
       <td class="py-3 text-slate-500">${esc(m.reason||'—')}</td>
       <td class="py-3 text-slate-500">${issuedToLabel(m)}</td>
       <td class="py-3 text-slate-500">${esc(m.loggedByName||'—')}</td>
-      <td class="py-3 pr-5 sm:pr-6 text-right"><button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button></td>
+      <td class="py-3 pr-5 sm:pr-6 text-right">${canManageInventory() ? `<button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}</td>
     </tr>`;
 }
 function acquisitionLabel(m){
@@ -1398,23 +1427,33 @@ function getFilteredMovements(){
   let list = [...state.movements];
   if(f.type) list = list.filter(m=>m.type===f.type);
   if(f.locationId) list = list.filter(m=>m.locationId===f.locationId);
+  if(f.acquisition) list = list.filter(m=>m.type==='in' && m.acquisition===f.acquisition);
   if(f.dateFrom) list = list.filter(m=>m.date >= f.dateFrom);
   if(f.dateTo) list = list.filter(m=>m.date <= f.dateTo);
   if(f.search){
     const q = f.search.toLowerCase();
     list = list.filter(m=>{
       const p = getProduct(m.productId);
-      return ((p?p.name:'')+' '+(m.reason||'')+' '+(m.acquisition||'')+' '+(m.department||'')+' '+(m.staffName||'')).toLowerCase().includes(q);
+      return ((p?p.name:'')+' '+(p&&p.variant?p.variant:'')+' '+(m.reason||'')+' '+(m.acquisition||'')+' '+(m.department||'')+' '+(m.staffName||'')).toLowerCase().includes(q);
     });
   }
   return list;
 }
+const ACQUISITION_TYPES = ['Purchase Order', 'CSR', 'Petty Cash'];
+function acquisitionBreakdown(list){
+  const map = {};
+  ACQUISITION_TYPES.forEach(a=>{ map[a] = 0; });
+  list.forEach(m=>{
+    if(m.type==='in' && m.acquisition && map.hasOwnProperty(m.acquisition)) map[m.acquisition] += m.quantity;
+  });
+  return map;
+}
 function hasActiveMovementFilters(){
   const f = ui.movementsFilter;
-  return !!(f.search || f.type || f.locationId || f.dateFrom || f.dateTo);
+  return !!(f.search || f.type || f.locationId || f.acquisition || f.dateFrom || f.dateTo);
 }
 function clearMovementFilters(){
-  ui.movementsFilter = { search:'', type:'', locationId:'', dateFrom:'', dateTo:'' };
+  ui.movementsFilter = { search:'', type:'', locationId:'', acquisition:'', dateFrom:'', dateTo:'' };
   rerenderMain();
 }
 
@@ -1478,10 +1517,13 @@ function viewAdmin(){
         <p class="text-sm text-slate-500 max-w-sm mx-auto">If this doesn't update, make sure Firestore rules allow admins to read the fdc_inventory_profiles collection.</p>
       </div>`}
     </div>
-
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-4 mt-8">
+  `;
+}
+function viewLocations(){
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
-        <h2 class="text-lg font-extrabold text-slate-900 tracking-tight">Locations</h2>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Locations</h1>
         <p class="text-sm text-slate-500 mt-0.5">Manage the sites you track stock and assets across.</p>
       </div>
       <button onclick="openLocationForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Add Location</button>
@@ -1512,6 +1554,7 @@ function viewAdmin(){
   `;
 }
 function openLocationForm(id){
+  if(!canManageInventory()){ toast('Only admins can manage locations.', true); return; }
   const editing = id ? getLocation(id) : null;
   const body = `
     <div id="lf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
@@ -1537,6 +1580,7 @@ function openLocationForm(id){
   openModal(editing?'Edit location':'Add location', body);
 }
 function saveLocation(id){
+  if(!canManageInventory()){ toast('Only admins can manage locations.', true); return; }
   const errEl = document.getElementById('lf-error');
   errEl.classList.add('hidden');
   const name = document.getElementById('lf-name').value.trim();
@@ -1558,6 +1602,7 @@ function saveLocation(id){
   rerenderMain();
 }
 function deleteLocation(id){
+  if(!canManageInventory()){ toast('Only admins can manage locations.', true); return; }
   if(LOCATIONS.length <= 1){ toast('At least one location is required.', true); return; }
   const loc = getLocation(id);
   if(!loc) return;
@@ -1647,7 +1692,9 @@ function viewMovements(){
 
   const totalIn = list.filter(m=>m.type==='in').reduce((s,m)=>s+m.quantity,0);
   const totalOut = list.filter(m=>m.type==='out').reduce((s,m)=>s+m.quantity,0);
+  const acqBreakdown = acquisitionBreakdown(list);
   const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
+  const acqOptions = ACQUISITION_TYPES.map(a=>`<option value="${esc(a)}" ${f.acquisition===a?'selected':''}>${esc(a)}</option>`).join('');
 
   return `
     <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
@@ -1674,6 +1721,9 @@ function viewMovements(){
         <select onchange="ui.movementsFilter.locationId=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
           <option value="">All locations</option>${locOptions}
         </select>
+        <select onchange="ui.movementsFilter.acquisition=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="">All acquisitions</option>${acqOptions}
+        </select>
       </div>
       <div class="flex flex-wrap items-center gap-2.5 mt-2.5">
         <label class="text-xs font-semibold text-slate-500">From</label>
@@ -1694,6 +1744,15 @@ function viewMovements(){
         <div class="text-xs font-medium text-slate-500">Stock out (filtered)</div>
         <div class="text-xl font-extrabold text-slate-900 mt-0.5 num">-${fmtNum(totalOut)}</div>
       </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+      ${ACQUISITION_TYPES.map(a=>`
+        <button onclick="ui.movementsFilter.acquisition=(ui.movementsFilter.acquisition==='${esc(a)}'?'':'${esc(a)}'); rerenderMain();" class="text-left bg-white rounded-xl border border-slate-200 p-4 hover:border-brand-300 transition-colors${f.acquisition===a?' ring-2 ring-brand-500':''}">
+          <div class="text-xs font-medium text-slate-500">${esc(a)} (units in)</div>
+          <div class="text-xl font-extrabold text-slate-900 mt-0.5 num">${fmtNum(acqBreakdown[a])}</div>
+        </button>
+      `).join('')}
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -1717,14 +1776,14 @@ function viewMovements(){
 
 function movementProductOptionsHtml(filterText){
   const f = (filterText||'').trim().toLowerCase();
-  const list = [...state.products].sort(byName).filter(p=>{
+  const list = [...state.products].sort(byDisplayName).filter(p=>{
     if(!f) return true;
-    return (p.name+' '+(p.sku||'')).toLowerCase().includes(f);
+    return (p.name+' '+(p.variant||'')+' '+(p.sku||'')).toLowerCase().includes(f);
   });
   if(!list.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No items match "${esc(filterText)}".</div>`;
   return list.map(p=>`
     <button type="button" onmousedown="event.preventDefault(); selectMovementProduct('${p.id}')" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
-      <span class="truncate">${esc(p.name)}</span>
+      <span class="truncate">${esc(displayName(p))}</span>
       <span class="text-[11px] text-slate-400 shrink-0 ml-2">${esc(p.sku||'')}</span>
     </button>
   `).join('');
@@ -1741,7 +1800,7 @@ function filterMovementProducts(clearSelection){
 function selectMovementProduct(id){
   const p = getProduct(id);
   document.getElementById('mf-product').value = id;
-  document.getElementById('mf-product-search').value = p ? (p.name + (p.sku?(' — '+p.sku):'')) : '';
+  document.getElementById('mf-product-search').value = p ? (displayName(p) + (p.sku?(' — '+p.sku):'')) : '';
   document.getElementById('mf-product-dropdown').classList.add('hidden');
   updateMovementHint();
 }
@@ -1750,7 +1809,7 @@ function hideMovementProductDropdown(){
 }
 function openMovementForm(type){
   if(state.products.length===0){ toast('Add at least one item before logging stock movements.', true); return; }
-  const sortedProducts = [...state.products].sort(byName);
+  const sortedProducts = [...state.products].sort(byDisplayName);
   const defaultProduct = sortedProducts[0];
   const isIn = type==='in';
   const body = `
@@ -1762,7 +1821,7 @@ function openMovementForm(type){
       <div class="relative">
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
         <input type="text" id="mf-product-search" autocomplete="off" placeholder="Search by name or SKU…"
-          value="${esc(defaultProduct.name + (defaultProduct.sku?(' — '+defaultProduct.sku):''))}"
+          value="${esc(displayName(defaultProduct) + (defaultProduct.sku?(' — '+defaultProduct.sku):''))}"
           oninput="filterMovementProducts(true)" onfocus="this.select(); filterMovementProducts(false);" onblur="hideMovementProductDropdown()"
           class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
         <input type="hidden" id="mf-product" value="${defaultProduct.id}">
@@ -1791,7 +1850,7 @@ function openMovementForm(type){
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Acquisition *</label>
       <select id="mf-acquisition" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
         <option value="">Select…</option>
-        <option value="Purchase Requisition">Purchase Requisition</option>
+        <option value="Purchase Order">Purchase Order</option>
         <option value="CSR">CSR</option>
         <option value="Petty Cash">Petty Cash</option>
       </select>
@@ -1868,6 +1927,7 @@ function saveMovement(type){
   rerenderMain();
 }
 function deleteMovement(id){
+  if(!canManageInventory()){ toast('Only admins can delete stock movements.', true); return; }
   const m = state.movements.find(x=>x.id===id);
   if(!m) return;
   confirmAction('Delete this movement? The quantity change it made will be reversed.', ()=>{
@@ -2005,8 +2065,9 @@ function viewAssets(){
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div class="px-5 sm:px-6 py-4 border-b border-slate-100">
+      <div class="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between">
         <div class="text-sm font-bold text-slate-900">Recent transfers</div>
+        <button onclick="goTo('asset-transactions')" class="text-xs font-semibold text-brand-600 hover:underline">View all →</button>
       </div>
       ${recentTransfers.length ? `
       <div class="overflow-x-auto">
@@ -2030,6 +2091,118 @@ function viewAssets(){
       </div>` : `<div class="text-center py-10 text-sm text-slate-400">No transfers logged yet.</div>`}
     </div>
   `;
+}
+
+function getFilteredAssetTransactions(){
+  const f = ui.assetTransactionsFilter;
+  let list = [...state.assetTransfers];
+  if(f.locationId) list = list.filter(t=> t.fromLocationId===f.locationId || t.toLocationId===f.locationId);
+  if(f.dateFrom) list = list.filter(t=>t.date >= f.dateFrom);
+  if(f.dateTo) list = list.filter(t=>t.date <= f.dateTo);
+  if(f.search){
+    const q = f.search.toLowerCase();
+    list = list.filter(t=>{
+      const a = getAsset(t.assetId);
+      return ((a?a.name:'')+' '+(t.toDepartment||'')+' '+(t.toAssignedTo||'')+' '+(t.reason||'')+' '+(t.handledByName||'')).toLowerCase().includes(q);
+    });
+  }
+  return list;
+}
+function hasActiveAssetTxFilters(){
+  const f = ui.assetTransactionsFilter;
+  return !!(f.search || f.locationId || f.dateFrom || f.dateTo);
+}
+function clearAssetTxFilters(){
+  ui.assetTransactionsFilter = { search:'', locationId:'', dateFrom:'', dateTo:'' };
+  rerenderMain();
+}
+function viewAssetTransactions(){
+  const f = ui.assetTransactionsFilter;
+  let list = getFilteredAssetTransactions();
+  list.sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt));
+  const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
+
+  const rows = list.map(t=>{
+    const a = getAsset(t.assetId);
+    return `
+      <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+        <td class="px-5 sm:px-6 py-3 text-slate-500">${fmtDate(t.date)}</td>
+        <td class="py-3 text-slate-700">${a?`<button onclick="openAssetDetail('${a.id}')" class="hover:text-brand-600 hover:underline text-left">${esc(a.name)}</button>`:'<span class="text-slate-400">Deleted asset</span>'}</td>
+        <td class="py-3">${locTag(t.fromLocationId)}</td>
+        <td class="py-3">${locTag(t.toLocationId)}</td>
+        <td class="py-3 text-slate-600">${esc(t.toDepartment||'—')}</td>
+        <td class="py-3 text-slate-600">${esc(t.toAssignedTo||'—')}</td>
+        <td class="py-3 text-slate-500">${esc(t.reason||'—')}</td>
+        <td class="py-3 text-slate-500">${esc(t.handledByName||'—')}</td>
+        <td class="py-3 pr-5 sm:pr-6 text-right">${canManageInventory() ? `<button onclick="deleteAssetTransfer('${t.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Asset Movements</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Every transfer and handover logged across your assets.</p>
+      </div>
+      <button onclick="exportAssetTransfersCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
+      <div class="flex flex-wrap gap-2.5">
+        <input type="text" placeholder="Search by asset, department, assignee, reason or handler…" value="${esc(f.search)}" oninput="ui.assetTransactionsFilter.search=this.value; rerenderMain();"
+          class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <select onchange="ui.assetTransactionsFilter.locationId=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="">All locations</option>${locOptions}
+        </select>
+      </div>
+      <div class="flex flex-wrap items-center gap-2.5 mt-2.5">
+        <label class="text-xs font-semibold text-slate-500">From</label>
+        <input type="date" value="${esc(f.dateFrom)}" onchange="ui.assetTransactionsFilter.dateFrom=this.value; rerenderMain();" class="px-3.5 py-2 rounded-lg border border-slate-300 text-sm">
+        <label class="text-xs font-semibold text-slate-500">To</label>
+        <input type="date" value="${esc(f.dateTo)}" onchange="ui.assetTransactionsFilter.dateTo=this.value; rerenderMain();" class="px-3.5 py-2 rounded-lg border border-slate-300 text-sm">
+        ${hasActiveAssetTxFilters() ? `<button onclick="clearAssetTxFilters()" class="text-xs font-semibold text-brand-600 hover:underline">Clear filters</button>` : ''}
+        <span class="text-xs text-slate-400 ml-auto">${list.length} record${list.length===1?'':'s'}</span>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Asset</th><th class="py-3 font-semibold">From</th><th class="py-3 font-semibold">To</th><th class="py-3 font-semibold">Department</th><th class="py-3 font-semibold">Assignee</th><th class="py-3 font-semibold">Reason</th><th class="py-3 font-semibold">Handled by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No movements ${hasActiveAssetTxFilters()?'match these filters':'yet'}</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto">${hasActiveAssetTxFilters()?'Try widening the date range or clearing a filter.':'Transfer or hand over an asset to start building history here.'}</p>
+      </div>`}
+    </div>
+  `;
+}
+function deleteAssetTransfer(id){
+  if(!canManageInventory()){ toast('Only admins can delete asset movements.', true); return; }
+  confirmAction('Delete this movement record? This only removes the log entry — the asset keeps its current location and assignee.', ()=>{
+    state.assetTransfers = state.assetTransfers.filter(t=>t.id!==id);
+    deleteAssetTransferDoc(id);
+    toast('Movement deleted.');
+    rerenderMain();
+  });
+}
+function exportAssetTransfersCSV(){
+  const f = ui.assetTransactionsFilter;
+  const header = ['Date','Asset','Tag','From','To','Department','Assignee','Reason','Handled by'];
+  const rows = getFilteredAssetTransactions().sort((a,b)=>a.date.localeCompare(b.date)).map(t=>{
+    const a = getAsset(t.assetId);
+    const fromLoc = getLocation(t.fromLocationId);
+    const toLoc = getLocation(t.toLocationId);
+    return [t.date, a?a.name:'', a?a.tag||'':'', fromLoc?fromLoc.name:'', toLoc?toLoc.name:'', t.toDepartment||'', t.toAssignedTo||'', t.reason||'', t.handledByName||''];
+  });
+  if(rows.length===0){ toast('No movements match the current filters — nothing to export.', true); return; }
+  const rangePart = (f.dateFrom || f.dateTo) ? `_${f.dateFrom||'start'}_to_${f.dateTo||'now'}` : '_' + todayStr();
+  downloadCSV('asset_movements' + rangePart + '.csv', header, rows);
 }
 
 function openAssetDetail(id){
@@ -2327,9 +2500,9 @@ function downloadCSV(filename, header, rows){
   URL.revokeObjectURL(url);
 }
 function exportProductsCSV(){
-  const header = ['SKU','Name','Description','Category', ...LOCATIONS.map(l=>l.name+' qty'), 'Total qty','Reorder level (total)', ...LOCATIONS.map(l=>l.name+' reorder level'), 'Status'];
-  const rows = [...state.products].sort(byName).map(p=>[
-    p.sku||'', p.name, p.description||'', p.category||'', ...LOCATIONS.map(l=>qtyAt(p,l.id)), productTotalQty(p),
+  const header = ['SKU','Name','Variant','Description','Category', ...LOCATIONS.map(l=>l.name+' qty'), 'Total qty','Reorder level (total)', ...LOCATIONS.map(l=>l.name+' reorder level'), 'Status'];
+  const rows = [...state.products].sort(byDisplayName).map(p=>[
+    p.sku||'', p.name, p.variant||'', p.description||'', p.category||'', ...LOCATIONS.map(l=>qtyAt(p,l.id)), productTotalQty(p),
     p.reorderLevel, ...LOCATIONS.map(l=>{ const rl = reorderLevelAt(p,l.id); return rl!=null?rl:''; }), isLowStock(p)?'Low stock':'In stock'
   ]);
   downloadCSV('items_' + todayStr() + '.csv', header, rows);
@@ -2340,7 +2513,7 @@ function exportMovementsCSV(){
   const rows = getFilteredMovements().sort((a,b)=>a.date.localeCompare(b.date)).map(m=>{
     const p = getProduct(m.productId);
     const loc = getLocation(m.locationId);
-    return [m.date, m.type==='in'?'Stock In':'Stock Out', p?p.name:'', p?p.sku||'':'', loc?loc.name:'', m.quantity, m.acquisition||'', m.reason||'', m.department||'', m.staffName||'', m.loggedByName||''];
+    return [m.date, m.type==='in'?'Stock In':'Stock Out', p?displayName(p):'', p?p.sku||'':'', loc?loc.name:'', m.quantity, m.acquisition||'', m.reason||'', m.department||'', m.staffName||'', m.loggedByName||''];
   });
   if(rows.length===0){ toast('No movements match the current filters — nothing to export.', true); return; }
   const rangePart = (f.dateFrom || f.dateTo) ? `_${f.dateFrom||'start'}_to_${f.dateTo||'now'}` : '_' + todayStr();
