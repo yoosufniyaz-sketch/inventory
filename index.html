@@ -1188,7 +1188,7 @@ function viewProducts(){
         <td class="py-3 text-right num">${hasPerLocationReorder(p) ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-semibold">Per location</span>' : fmtNum(p.reorderLevel)}</td>
         <td class="py-3 text-center">${low ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold"'+(hasPerLocationReorder(p)?(' title="Low at '+lowStockLocations(p).map(l=>esc(l.code)).join(', ')+'"'):'')+'>Low stock</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}</td>
         <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
-          <button onclick="openProductForm('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
+          ${canManageInventory() ? `<button onclick="openProductForm('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>` : ''}
           ${canManageInventory() ? `<button onclick="deleteProduct('${p.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}
         </td>
       </tr>`;
@@ -1240,7 +1240,7 @@ function viewProducts(){
 }
 
 function openProductForm(id){
-  if(!id && !canManageInventory()){ toast('Only admins can add new items.', true); return; }
+  if(!canManageInventory()){ toast(id ? 'Only admins can edit items.' : 'Only admins can add new items.', true); return; }
   const editing = id ? getProduct(id) : null;
   const catList = distinctCategories();
   const body = `
@@ -1326,7 +1326,7 @@ function updatePfNamePreview(){
 }
 
 function saveProduct(id){
-  if(!id && !canManageInventory()){ toast('Only admins can add new items.', true); return; }
+  if(!canManageInventory()){ toast(id ? 'Only admins can edit items.' : 'Only admins can add new items.', true); return; }
   const errEl = document.getElementById('pf-error');
   errEl.classList.add('hidden');
   const name = document.getElementById('pf-name').value.trim();
@@ -2005,7 +2005,7 @@ function viewAssets(){
         <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
           <button onclick="openAssetDetail('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Details</button>
           <button onclick="openTransferForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Transfer</button>
-          <button onclick="openAssetForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
+          ${canManageInventory() ? `<button onclick="openAssetForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>` : ''}
           <button onclick="deleteAsset('${a.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
         </td>
       </tr>`;
@@ -2247,7 +2247,7 @@ function viewAssetDetail(){
       </div>
       <div class="flex gap-2.5">
         <button onclick="openTransferForm('${asset.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Transfer</button>
-        <button onclick="openAssetForm('${asset.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">Edit</button>
+        ${canManageInventory() ? `<button onclick="openAssetForm('${asset.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">Edit</button>` : ''}
       </div>
     </div>
 
@@ -2308,6 +2308,7 @@ function viewAssetDetail(){
 }
 
 function openAssetForm(id){
+  if(id && !canManageInventory()){ toast('Only admins can edit assets.', true); return; }
   const editing = id ? getAsset(id) : null;
   const body = `
     <div id="af-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
@@ -2366,6 +2367,7 @@ function openAssetForm(id){
   openModal(editing?'Edit asset':'Add asset', body, true);
 }
 function saveAsset(id){
+  if(id && !canManageInventory()){ toast('Only admins can edit assets.', true); return; }
   const errEl = document.getElementById('af-error');
   errEl.classList.add('hidden');
   const name = document.getElementById('af-name').value.trim();
