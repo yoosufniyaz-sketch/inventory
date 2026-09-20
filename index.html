@@ -30,6 +30,14 @@
   @media (min-width: 1024px){
     #sidebar{ position: sticky; top: 0; bottom: auto; align-self: flex-start; height: 100vh; width: 16rem; flex-shrink: 0; }
   }
+  .sticky-toolbar{ position: sticky; top: 3.5rem; z-index: 20; background: #f1f5f9; padding-top: 0.5rem; margin-top: -0.5rem; }
+  @media (min-width: 1024px){ .sticky-toolbar{ top: 0; } }
+  .sticky-toolbar.sticky-toolbar-card{ background: #fff; padding-top: 1rem; margin-top: 0; }
+  .sticky-thead th{ position: sticky; top: var(--tt, 3.5rem); z-index: 15; background: #fff; box-shadow: 0 1px 0 0 rgb(241 245 249); }
+  @media (min-width: 1024px){ .sticky-thead th{ top: var(--ttlg, 0px); } }
+  .sticky-thead-0{ --tt: 3.5rem; --ttlg: 0px; }
+  .sticky-thead-1{ --tt: 7rem; --ttlg: 2.75rem; }
+  .sticky-thead-2{ --tt: 11.5rem; --ttlg: 7rem; }
   @media print{
     .no-print{ display:none !important; }
     body{ background:#fff; }
@@ -1142,9 +1150,9 @@ function viewStockLevels(){
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
       ${list.length ? `
-      <div class="overflow-x-auto">
+      <div class="w-full">
         <table class="w-full text-sm">
-          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+          <thead><tr class="sticky-thead sticky-thead-0 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Item</th>
             ${LOCATIONS.map(l=>`<th class="py-3 font-semibold text-right">${esc(l.code)}</th>`).join('')}
             <th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Total</th>
@@ -1206,7 +1214,7 @@ function viewProducts(){
       </div>
     </div>
 
-    <div class="flex flex-wrap gap-2.5 mb-4">
+    <div class="sticky-toolbar flex flex-wrap gap-2.5 mb-4">
       <input type="text" placeholder="Search by name, variant, SKU or description…" value="${esc(f.search)}" oninput="ui.productsFilter.search=this.value; rerenderMain();"
         class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       <select onchange="ui.productsFilter.category=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
@@ -1217,9 +1225,9 @@ function viewProducts(){
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
       ${list.length ? `
-      <div class="overflow-x-auto">
+      <div class="w-full">
         <table class="w-full text-sm">
-          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+          <thead><tr class="sticky-thead sticky-thead-1 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Item</th>
             <th class="py-3 font-semibold">Category</th>
             <th class="py-3 font-semibold text-right">Qty on hand</th>
@@ -1718,7 +1726,7 @@ function viewMovements(){
       </div>
     </div>
 
-    <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
+    <div class="sticky-toolbar sticky-toolbar-card bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
       <div class="flex flex-wrap gap-2.5">
         <input type="text" placeholder="Search by item, reason, staff or department…" value="${esc(f.search)}" oninput="ui.movementsFilter.search=this.value; rerenderMain();"
           class="flex-1 min-w-[180px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
@@ -1766,9 +1774,9 @@ function viewMovements(){
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
       ${list.length ? `
-      <div class="overflow-x-auto">
+      <div class="w-full">
         <table class="w-full text-sm">
-          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+          <thead><tr class="sticky-thead sticky-thead-2 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold">Location</th>
             <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Acquisition</th><th class="py-3 font-semibold">Reason / reference</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
@@ -2039,7 +2047,7 @@ function viewAssets(){
       `).join('')}
     </div>
 
-    <div class="flex flex-wrap gap-2.5 mb-4">
+    <div class="sticky-toolbar flex flex-wrap gap-2.5 mb-4">
       <input type="text" placeholder="Search by name, tag or assignee…" value="${esc(f.search)}" oninput="ui.assetsFilter.search=this.value; rerenderMain();"
         class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       <select onchange="ui.assetsFilter.locationId=this.value; rerenderMain();" class="px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
@@ -2053,9 +2061,9 @@ function viewAssets(){
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
       ${list.length ? `
-      <div class="overflow-x-auto">
+      <div class="w-full">
         <table class="w-full text-sm">
-          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+          <thead><tr class="sticky-thead sticky-thead-1 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Asset</th>
             <th class="py-3 font-semibold">Location</th>
             <th class="py-3 font-semibold">Department</th>
@@ -2156,7 +2164,7 @@ function viewAssetTransactions(){
       <button onclick="exportAssetTransfersCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
     </div>
 
-    <div class="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
+    <div class="sticky-toolbar sticky-toolbar-card bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
       <div class="flex flex-wrap gap-2.5">
         <input type="text" placeholder="Search by asset, department, assignee, reason or handler…" value="${esc(f.search)}" oninput="ui.assetTransactionsFilter.search=this.value; rerenderMain();"
           class="flex-1 min-w-[200px] px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
@@ -2176,9 +2184,9 @@ function viewAssetTransactions(){
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
       ${list.length ? `
-      <div class="overflow-x-auto">
+      <div class="w-full">
         <table class="w-full text-sm">
-          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+          <thead><tr class="sticky-thead sticky-thead-2 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Asset</th><th class="py-3 font-semibold">From</th><th class="py-3 font-semibold">To</th><th class="py-3 font-semibold">Department</th><th class="py-3 font-semibold">Assignee</th><th class="py-3 font-semibold">Reason</th><th class="py-3 font-semibold">Handled by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
           <tbody>${rows}</tbody>
