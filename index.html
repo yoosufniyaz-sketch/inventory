@@ -35,6 +35,33 @@
   .sticky-toolbar.sticky-toolbar-card{ background: #fff; padding-top: 1rem; margin-top: 0; }
   .sticky-thead th{ position: sticky; top: 3.5rem; z-index: 15; background: #fff; box-shadow: 0 1px 0 0 rgb(241 245 249); }
   @media (min-width: 1024px){ .sticky-thead th{ top: 0; } }
+
+  /* ---------- Dark mode ---------- */
+  html[data-theme="dark"]{ color-scheme: dark; }
+  html[data-theme="dark"] body.bg-slate-100{ background-color: #0f172a; }
+  html[data-theme="dark"] .bg-slate-100{ background-color: #334155; }
+  html[data-theme="dark"] .bg-slate-50{ background-color: #1e293b; }
+  html[data-theme="dark"] .bg-white{ background-color: #1e293b; }
+  html[data-theme="dark"] .border-slate-100{ border-color: #334155; }
+  html[data-theme="dark"] .border-slate-200{ border-color: #334155; }
+  html[data-theme="dark"] .border-slate-300{ border-color: #475569; }
+  html[data-theme="dark"] .divide-slate-100 > :not([hidden]) ~ :not([hidden]){ border-color: #334155; }
+  html[data-theme="dark"] .text-slate-900{ color: #f1f5f9; }
+  html[data-theme="dark"] .text-slate-800{ color: #e2e8f0; }
+  html[data-theme="dark"] .text-slate-700{ color: #cbd5e1; }
+  html[data-theme="dark"] .text-slate-600{ color: #94a3b8; }
+  html[data-theme="dark"] .text-slate-500{ color: #94a3b8; }
+  html[data-theme="dark"] .text-slate-400{ color: #64748b; }
+  html[data-theme="dark"] .text-slate-300{ color: #475569; }
+  html[data-theme="dark"] input, html[data-theme="dark"] select, html[data-theme="dark"] textarea{ background-color: #0f172a; color: #e2e8f0; }
+  html[data-theme="dark"] input::placeholder, html[data-theme="dark"] textarea::placeholder{ color: #64748b; }
+  html[data-theme="dark"] .hover\\:bg-slate-50:hover{ background-color: #273449; }
+  html[data-theme="dark"] .hover\\:bg-slate-100:hover{ background-color: #334155; }
+  html[data-theme="dark"] .sticky-toolbar{ background-color: #0f172a; }
+  html[data-theme="dark"] .sticky-toolbar.sticky-toolbar-card{ background-color: #1e293b; }
+  html[data-theme="dark"] .sticky-thead th{ background-color: #1e293b; box-shadow: 0 1px 0 0 #334155; }
+  html[data-theme="dark"] ::-webkit-scrollbar-thumb{ background:#475569; }
+
   @media print{
     .no-print{ display:none !important; }
     body{ background:#fff; }
@@ -59,8 +86,12 @@
 
   <!-- Sidebar -->
   <aside id="sidebar" class="fixed lg:sticky lg:top-0 lg:self-start lg:h-screen inset-y-0 left-0 w-64 bg-slate-900 text-slate-200 flex flex-col z-40 -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-out">
-    <div class="px-6 py-6 border-b border-white/10">
+    <div class="px-6 py-6 border-b border-white/10 flex items-center justify-between">
       <div class="text-lg font-extrabold tracking-tight text-white">FDC Inventory</div>
+      <button onclick="toggleTheme()" id="theme-toggle-btn" title="Switch theme" class="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg text-slate-300 hover:bg-white/10 hover:text-white">
+        <svg id="theme-icon-sun" width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" class="hidden"><circle cx="10" cy="10" r="3.2"/><path stroke-linecap="round" d="M10 2.5v1.8M10 15.7v1.8M17.5 10h-1.8M4.3 10H2.5M15.3 4.7l-1.27 1.27M5.97 14.03L4.7 15.3M15.3 15.3l-1.27-1.27M5.97 5.97L4.7 4.7"/></svg>
+        <svg id="theme-icon-moon" width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M17 10.8A7.5 7.5 0 0 1 9.2 3 7.5 7.5 0 1 0 17 10.8z"/></svg>
+      </button>
     </div>
     <nav id="nav-list" class="flex-1 px-3 py-4 space-y-1 overflow-y-auto"></nav>
     <div id="sidebar-foot" class="px-5 py-4 border-t border-white/10"></div>
@@ -129,6 +160,28 @@ const ui = {
    to other devices or follow you if you switch browsers.
 ===================================================================== */
 const STORAGE_PREFIX = 'fdc_inventory_';
+const THEME_KEY = STORAGE_PREFIX + 'theme';
+function applyTheme(theme){
+  document.documentElement.setAttribute('data-theme', theme);
+  const sun = document.getElementById('theme-icon-sun');
+  const moon = document.getElementById('theme-icon-moon');
+  if(sun && moon){
+    sun.classList.toggle('hidden', theme!=='dark');
+    moon.classList.toggle('hidden', theme==='dark');
+  }
+}
+function toggleTheme(){
+  const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  try{ localStorage.setItem(THEME_KEY, next); }catch(e){}
+  applyTheme(next);
+}
+(function initTheme(){
+  let saved = null;
+  try{ saved = localStorage.getItem(THEME_KEY); }catch(e){}
+  if(!saved) saved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  applyTheme(saved);
+})();
 
 function hasStorageApi(){
   try{
