@@ -1085,20 +1085,20 @@ function viewDashboard(){
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
       ${LOCATIONS.map((l,i)=>`
         <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${l.color}"></span>
-            <span class="text-sm font-bold text-slate-900 truncate">${esc(l.name)}</span>
-            <span class="${canManageInventory()?'':'ml-auto'} text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(l.code)}</span>
-            ${canManageInventory() ? `
-            <div class="ml-auto flex items-center gap-0.5 shrink-0">
-              <button onclick="moveLocation('${l.id}','up')" ${i===0?'disabled':''} title="Move up" class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none">
-                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12l5-5 5 5"/></svg>
-              </button>
-              <button onclick="moveLocation('${l.id}','down')" ${i===LOCATIONS.length-1?'disabled':''} title="Move down" class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none">
-                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8l5 5 5-5"/></svg>
-              </button>
-            </div>` : ''}
+          <div class="flex items-start gap-2 mb-1">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0 mt-1" style="background:${l.color}"></span>
+            <span class="text-sm font-bold text-slate-900 leading-snug flex-1 min-w-0">${esc(l.name)}</span>
+            <span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(l.code)}</span>
           </div>
+          ${canManageInventory() ? `
+          <div class="flex items-center justify-end gap-0.5 mb-2 -mt-0.5">
+            <button onclick="moveLocation('${l.id}','up')" ${i===0?'disabled':''} title="Move up" class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none">
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12l5-5 5 5"/></svg>
+            </button>
+            <button onclick="moveLocation('${l.id}','down')" ${i===LOCATIONS.length-1?'disabled':''} title="Move down" class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none">
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8l5 5 5-5"/></svg>
+            </button>
+          </div>` : `<div class="mb-3"></div>`}
           <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Items in stock</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalItems(l.id))}</span></div>
           <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Total units</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalUnits(l.id))}</span></div>
           <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Assets</span><span class="num font-semibold text-slate-800">${fmtNum(assetLocationTotals(l.id))}</span></div>
