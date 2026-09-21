@@ -2110,7 +2110,7 @@ function viewAssets(){
           <button onclick="openAssetDetail('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Details</button>
           <button onclick="openTransferForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Transfer</button>
           ${canManageInventory() ? `<button onclick="openAssetForm('${a.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>` : ''}
-          <button onclick="deleteAsset('${a.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>
+          ${canManageInventory() ? `<button onclick="deleteAsset('${a.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}
         </td>
       </tr>`;
   }).join('');
@@ -2408,9 +2408,10 @@ function viewAssetDetail(){
       </div>` : `<div class="text-center py-10 text-sm text-slate-400">No transfers logged for this asset yet.</div>`}
     </div>
 
+    ${canManageInventory() ? `
     <div class="flex justify-end">
       <button onclick="deleteAsset('${asset.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete this asset</button>
-    </div>
+    </div>` : ''}
   `;
 }
 
@@ -2559,6 +2560,7 @@ function saveAsset(id){
   rerenderMain();
 }
 function deleteAsset(id){
+  if(!canManageInventory()){ toast('Only admins can delete assets.', true); return; }
   confirmAction('Delete this asset and its transfer history? This cannot be undone.', async ()=>{
     const transfersToDelete = state.assetTransfers.filter(t=>t.assetId===id);
     state.assets = state.assets.filter(a=>a.id!==id);
