@@ -872,6 +872,13 @@ function fmtDate(d){
 }
 function fmtNum(n){ return (Number(n)||0).toLocaleString(undefined, { maximumFractionDigits:2 }); }
 function byName(a,b){ return (a.name||'').localeCompare(b.name||''); }
+function byTag(a,b){
+  const ta = (a.tag||'').trim(), tb = (b.tag||'').trim();
+  if(!ta && !tb) return byName(a,b);
+  if(!ta) return 1;  // items with no code sort after coded ones
+  if(!tb) return -1;
+  return ta.localeCompare(tb, undefined, { numeric: true, sensitivity: 'base' });
+}
 function displayName(p){ return (p.variant||'').trim() ? p.name + ' (' + p.variant.trim() + ')' : p.name; }
 function byDisplayName(a,b){ return displayName(a).localeCompare(displayName(b)); }
 function getProduct(id){ return state.products.find(p=>p.id===id); }
@@ -2210,7 +2217,7 @@ function assetStatusBadge(status){
 }
 function viewAssets(){
   const f = ui.assetsFilter;
-  const list = getFilteredAssets().sort(byName);
+  const list = getFilteredAssets().sort(byTag);
   const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
 
   const rows = list.map(a=>{
@@ -2222,10 +2229,11 @@ function viewAssets(){
             ${a.image ? `<img src="${a.image}" alt="" class="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0">` : `<div class="w-9 h-9 rounded-lg bg-slate-100 shrink-0"></div>`}
             <div class="min-w-0">
               <button onclick="openAssetDetail('${a.id}')" class="font-semibold text-slate-800 hover:text-brand-600 hover:underline text-left">${esc(a.name)}</button>
-              <div class="text-[11.5px] text-slate-400">${esc(a.tag||'No tag')}${a.serialNumber?(' · SN '+esc(a.serialNumber)):''}${a.category?(' · '+esc(a.category)):''}</div>
+              <div class="text-[11.5px] text-slate-400">${a.serialNumber?('SN '+esc(a.serialNumber)):esc(a.category||'')}${a.serialNumber&&a.category?(' · '+esc(a.category)):''}</div>
             </div>
           </div>
         </td>
+        <td class="py-3">${a.tag ? `<span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium num">${esc(a.tag)}</span>` : '<span class="text-slate-300">—</span>'}</td>
         <td class="py-3">${loc ? locTag(loc.id) : '<span class="text-slate-400">—</span>'}</td>
         <td class="py-3 text-slate-600">${esc(a.department||'—')}</td>
         <td class="py-3 text-slate-600">${esc(a.assignedTo||'—')}</td>
@@ -2285,6 +2293,7 @@ function viewAssets(){
         <table class="w-full text-sm">
           <thead><tr class="sticky-thead sticky-thead-1 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Asset</th>
+            <th class="py-3 font-semibold">Asset code</th>
             <th class="py-3 font-semibold">Location</th>
             <th class="py-3 font-semibold">Department</th>
             <th class="py-3 font-semibold">Assigned to</th>
