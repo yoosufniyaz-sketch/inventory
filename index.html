@@ -1080,6 +1080,7 @@ function viewDashboard(){
           </div>
           <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Items in stock</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalItems(l.id))}</span></div>
           <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Total units</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalUnits(l.id))}</span></div>
+          <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Assets</span><span class="num font-semibold text-slate-800">${fmtNum(assetLocationTotals(l.id))}</span></div>
         </div>
       `).join('')}
     </div>
