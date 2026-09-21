@@ -1049,6 +1049,14 @@ function categoryBreakdown(){
   });
   return Object.entries(map).map(([category, units])=>({category, units})).sort((a,b)=>b.units-a.units);
 }
+function assetCategoryBreakdown(){
+  const map = {};
+  state.assets.forEach(a=>{
+    const cat = (a.category||'').trim() || 'Uncategorized';
+    map[cat] = (map[cat]||0) + 1;
+  });
+  return Object.entries(map).map(([category, count])=>({category, count})).sort((a,b)=>b.count-a.count);
+}
 
 /* =====================================================================
    VIEW: DASHBOARD
@@ -1065,6 +1073,8 @@ function viewDashboard(){
   const activeAssets = state.assets.filter(a=>a.status!=='retired').length;
   const retiredAssets = totalAssets - activeAssets;
   const maxAssetsAtLoc = Math.max(1, ...LOCATIONS.map(l=>assetLocationTotals(l.id)));
+  const assetCatBreakdown = assetCategoryBreakdown();
+  const maxAssetCat = Math.max(1, ...assetCatBreakdown.map(b=>b.count));
   const recentAssetActivity = [...state.assetTransfers].sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,8);
 
   return `
@@ -1175,23 +1185,44 @@ function viewDashboard(){
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-6">
-      <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
-        <div class="text-sm font-bold text-slate-900 mb-1">Assets by location</div>
-        <div class="text-xs text-slate-500 mb-5">Number of assets assigned to each site</div>
-        ${totalAssets ? `
-        <div class="space-y-3.5">
-          ${LOCATIONS.map((l,i)=>`
-            <div>
-              <div class="flex justify-between text-xs font-medium text-slate-600 mb-1">
-                <span class="truncate pr-2">${esc(l.name)}</span>
-                <span class="num shrink-0">${fmtNum(assetLocationTotals(l.id))} assets</span>
+      <div class="lg:col-span-3 flex flex-col gap-5">
+        <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+          <div class="text-sm font-bold text-slate-900 mb-1">Assets by category</div>
+          <div class="text-xs text-slate-500 mb-5">Number of assets in each category</div>
+          ${totalAssets ? `
+          <div class="space-y-3.5">
+            ${assetCatBreakdown.map((b,i)=>`
+              <div>
+                <div class="flex justify-between text-xs font-medium text-slate-600 mb-1">
+                  <span class="truncate pr-2">${esc(b.category)}</span>
+                  <span class="num shrink-0">${fmtNum(b.count)} asset${b.count===1?'':'s'}</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div class="h-full rounded-full bar-fill ${barColors[i % barColors.length]}" style="width:${Math.max(3, Math.round(b.count/maxAssetCat*100))}%"></div>
+                </div>
               </div>
-              <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
-                <div class="h-full rounded-full bar-fill ${barColors[i % barColors.length]}" style="width:${Math.max(3, Math.round(assetLocationTotals(l.id)/maxAssetsAtLoc*100))}%"></div>
+            `).join('')}
+          </div>` : `<div class="text-center py-10 text-sm text-slate-400">Add an asset to see the category breakdown.</div>`}
+        </div>
+
+        <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+          <div class="text-sm font-bold text-slate-900 mb-1">Assets by location</div>
+          <div class="text-xs text-slate-500 mb-5">Number of assets assigned to each site</div>
+          ${totalAssets ? `
+          <div class="space-y-3.5">
+            ${LOCATIONS.map((l,i)=>`
+              <div>
+                <div class="flex justify-between text-xs font-medium text-slate-600 mb-1">
+                  <span class="truncate pr-2">${esc(l.name)}</span>
+                  <span class="num shrink-0">${fmtNum(assetLocationTotals(l.id))} assets</span>
+                </div>
+                <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div class="h-full rounded-full bar-fill ${barColors[i % barColors.length]}" style="width:${Math.max(3, Math.round(assetLocationTotals(l.id)/maxAssetsAtLoc*100))}%"></div>
+                </div>
               </div>
-            </div>
-          `).join('')}
-        </div>` : `<div class="text-center py-10 text-sm text-slate-400">Add an asset to see the location breakdown.</div>`}
+            `).join('')}
+          </div>` : `<div class="text-center py-10 text-sm text-slate-400">Add an asset to see the location breakdown.</div>`}
+        </div>
       </div>
 
       <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
