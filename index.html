@@ -476,6 +476,18 @@ async function persistLocations(){
     catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
   }
 }
+function moveLocation(id, direction){
+  if(!canManageInventory()){ toast('Only admins can reorder locations.', true); return; }
+  const idx = LOCATIONS.findIndex(l=>l.id===id);
+  if(idx===-1) return;
+  const swapWith = direction==='up' ? idx-1 : idx+1;
+  if(swapWith<0 || swapWith>=LOCATIONS.length) return;
+  const tmp = LOCATIONS[idx];
+  LOCATIONS[idx] = LOCATIONS[swapWith];
+  LOCATIONS[swapWith] = tmp;
+  persistLocations();
+  rerenderMain();
+}
 function disconnectCloud(){
   confirmAction('Disconnect cloud sync? Your data will stay saved in this browser only from now on.', async ()=>{
     setCloudConfig(null);
@@ -1071,12 +1083,21 @@ function viewDashboard(){
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-      ${LOCATIONS.map(l=>`
+      ${LOCATIONS.map((l,i)=>`
         <div class="bg-white rounded-xl border border-slate-200 p-5">
           <div class="flex items-center gap-2 mb-3">
             <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${l.color}"></span>
             <span class="text-sm font-bold text-slate-900 truncate">${esc(l.name)}</span>
-            <span class="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(l.code)}</span>
+            <span class="${canManageInventory()?'':'ml-auto'} text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(l.code)}</span>
+            ${canManageInventory() ? `
+            <div class="ml-auto flex items-center gap-0.5 shrink-0">
+              <button onclick="moveLocation('${l.id}','up')" ${i===0?'disabled':''} title="Move up" class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none">
+                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12l5-5 5 5"/></svg>
+              </button>
+              <button onclick="moveLocation('${l.id}','down')" ${i===LOCATIONS.length-1?'disabled':''} title="Move down" class="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none">
+                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8l5 5 5-5"/></svg>
+              </button>
+            </div>` : ''}
           </div>
           <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Items in stock</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalItems(l.id))}</span></div>
           <div class="flex justify-between text-xs text-slate-500 py-0.5"><span>Total units</span><span class="num font-semibold text-slate-800">${fmtNum(locationTotalUnits(l.id))}</span></div>
@@ -1084,6 +1105,7 @@ function viewDashboard(){
         </div>
       `).join('')}
     </div>
+    ${canManageInventory() && LOCATIONS.length>1 ? `<div class="text-[11px] text-slate-400 -mt-4 mb-6">Use the arrows to reorder how locations appear here.</div>` : ''}
 
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-6">
       <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
