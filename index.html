@@ -926,7 +926,7 @@ function currentNav(){
 function renderNav(){
   document.getElementById('nav-list').innerHTML = currentNav().map(n=>`
     <a href="#" onclick="goTo('${n.id}');return false;"
-       class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors ${(ui.tab===n.id || (n.id==='assets' && ui.tab==='asset-detail')) ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
+       class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors ${(ui.tab===n.id || (n.id==='assets' && ui.tab==='asset-detail') || (n.id==='products' && ui.tab==='item-detail')) ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
       ${ICONS[n.icon]}<span>${n.label}</span>
     </a>
   `).join('');
@@ -1031,6 +1031,7 @@ function render(){
   try{
     if(ui.tab==='dashboard') el.innerHTML = viewDashboard();
     else if(ui.tab==='products') el.innerHTML = viewProducts();
+    else if(ui.tab==='item-detail') el.innerHTML = viewItemDetail();
     else if(ui.tab==='levels') el.innerHTML = viewStockLevels();
     else if(ui.tab==='movements') el.innerHTML = viewMovements();
     else if(ui.tab==='assets') el.innerHTML = viewAssets();
@@ -1397,7 +1398,7 @@ function viewProducts(){
           <div class="flex items-center gap-3">
             ${p.image ? `<img src="${p.image}" alt="" class="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0">` : `<div class="w-9 h-9 rounded-lg bg-slate-100 shrink-0"></div>`}
             <div class="min-w-0">
-              <div class="font-semibold text-slate-800"${p.description?(' title="'+esc(p.description)+'"'):''}>${esc(displayName(p))}</div>
+              <button onclick="openItemDetail('${p.id}')" class="font-semibold text-slate-800 hover:text-brand-600 hover:underline text-left"${p.description?(' title="'+esc(p.description)+'"'):''}>${esc(displayName(p))}</button>
               <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
             </div>
           </div>
@@ -1407,6 +1408,7 @@ function viewProducts(){
         <td class="py-3 text-right num">${hasPerLocationReorder(p) ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-semibold">Per location</span>' : fmtNum(p.reorderLevel)}</td>
         <td class="py-3 text-center">${low ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold"'+(hasPerLocationReorder(p)?(' title="Low at '+lowStockLocations(p).map(l=>esc(l.code)).join(', ')+'"'):'')+'>Low stock</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}</td>
         <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+          <button onclick="openItemDetail('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Details</button>
           ${canManageInventory() ? `<button onclick="openProductForm('${p.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>` : ''}
           ${canManageInventory() ? `<button onclick="deleteProduct('${p.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}
         </td>
@@ -2468,6 +2470,112 @@ function exportAssetTransfersCSV(){
   downloadCSV('asset_movements' + rangePart + '.csv', header, rows);
 }
 
+function openItemDetail(id){
+  ui.selectedItemId = id;
+  ui.tab = 'item-detail';
+  toggleSidebar(false);
+  render();
+  window.scrollTo(0,0);
+}
+function viewItemDetail(){
+  const p = getProduct(ui.selectedItemId);
+  if(!p){
+    return `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">Item not found</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">This item may have been deleted.</p>
+        <button onclick="goTo('products')" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">← Back to Items</button>
+      </div>`;
+  }
+  const low = isLowStock(p);
+  const total = productTotalQty(p);
+  const history = state.movements.filter(m=>m.productId===p.id).sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,15);
+
+  return `
+    <button onclick="goTo('products')" class="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline mb-4">← Back to Items</button>
+
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div class="flex items-start gap-4">
+        ${p.image ? `<img src="${p.image}" alt="${esc(displayName(p))}" class="w-20 h-20 rounded-xl object-cover border border-slate-200 shrink-0">` : ''}
+        <div>
+          <div class="flex items-center gap-2.5 mb-1 flex-wrap">
+            <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">${esc(displayName(p))}</h1>
+            ${low ? '<span class="inline-flex px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Low stock</span>' : '<span class="inline-flex px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">In stock</span>'}
+          </div>
+          <p class="text-sm text-slate-500">${esc(p.sku||'No SKU')}${p.category?(' · '+esc(p.category)):''}</p>
+        </div>
+      </div>
+      <div class="flex gap-2.5">
+        <button onclick="goTo('movements'); setTimeout(()=>{openMovementForm('in'); setTimeout(()=>selectMovementProduct('${p.id}'),0);},0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Stock In/Out</button>
+        ${canManageInventory() ? `<button onclick="openProductForm('${p.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">Edit</button>` : ''}
+      </div>
+    </div>
+
+    ${p.description ? `
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
+      <div class="text-sm font-bold text-slate-900 mb-2">Description</div>
+      <p class="text-sm text-slate-600 whitespace-pre-wrap">${esc(p.description)}</p>
+    </div>` : ''}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Total quantity</div>
+        <div class="text-2xl font-extrabold text-slate-900 mt-1 num">${fmtNum(total)}</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Reorder level</div>
+        <div class="text-2xl font-extrabold text-slate-900 mt-1 num">${hasPerLocationReorder(p) ? '<span class="text-sm font-semibold text-slate-500">Per location</span>' : fmtNum(p.reorderLevel)}</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Category</div>
+        <div class="text-sm font-bold text-slate-900 mt-1">${esc(p.category||'Uncategorized')}</div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="text-xs font-medium text-slate-500">Added</div>
+        <div class="text-sm font-bold text-slate-900 mt-1">${p.createdAt?fmtDate(p.createdAt.slice(0,10)):'—'}</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
+      <div class="text-sm font-bold text-slate-900 mb-1">Stock by location</div>
+      <div class="text-xs text-slate-500 mb-4">Quantity on hand at each site</div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        ${LOCATIONS.map(l=>{
+          const q = qtyAt(p, l.id);
+          const rl = reorderLevelAt(p, l.id);
+          const cellLow = rl!=null && q <= rl;
+          return `
+          <div class="rounded-lg border border-slate-200 p-3">
+            <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 mb-1"><span class="w-2 h-2 rounded-full shrink-0" style="background:${l.color}"></span>${esc(l.code)}</div>
+            <div class="text-lg font-bold num ${cellLow?'text-amber-700':'text-slate-900'}">${fmtNum(q)}</div>
+            ${rl!=null ? `<div class="text-[10.5px] text-slate-400">Reorder at ${fmtNum(rl)}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="text-sm font-bold text-slate-900">Recent stock movements</div>
+        <span class="text-xs text-slate-400">${history.length} record${history.length===1?'':'s'}</span>
+      </div>
+      ${history.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-2.5 font-semibold">Date</th><th class="py-2.5 font-semibold">Type</th><th class="py-2.5 font-semibold">Location</th><th class="py-2.5 font-semibold text-right pr-5 sm:pr-6">Qty</th>
+          </tr></thead>
+          <tbody>${history.map(m=>movementRow(m,true)).join('')}</tbody>
+        </table>
+      </div>` : `<div class="text-center py-10 text-sm text-slate-400">No stock movements logged for this item yet.</div>`}
+    </div>
+
+    ${canManageInventory() ? `
+    <div class="flex justify-end mt-4">
+      <button onclick="deleteProduct('${p.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete this item</button>
+    </div>` : ''}
+  `;
+}
 function openAssetDetail(id){
   ui.selectedAssetId = id;
   ui.tab = 'asset-detail';
