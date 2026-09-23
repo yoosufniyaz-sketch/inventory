@@ -935,7 +935,6 @@ function goTo(tab){
   ui.tab = tab;
   toggleSidebar(false);
   render();
-  window.scrollTo(0,0);
 }
 function toggleSidebar(open){
   ui.sidebarOpen = open;
@@ -1019,11 +1018,19 @@ function renderApp(){
   }
 }
 
+let lastRenderedTab = null;
+const DETAIL_TABS = ['item-detail','asset-detail'];
 function render(){
   const activeEl = document.activeElement;
   const activeId = (activeEl && activeEl.id && el_contains_main(activeEl)) ? activeEl.id : null;
   const selStart = (activeId && typeof activeEl.selectionStart === 'number') ? activeEl.selectionStart : null;
   const selEnd = (activeId && typeof activeEl.selectionEnd === 'number') ? activeEl.selectionEnd : null;
+
+  const tabChanged = lastRenderedTab !== null && lastRenderedTab !== ui.tab;
+  if(tabChanged){
+    if(!ui.scrollPositions) ui.scrollPositions = {};
+    ui.scrollPositions[lastRenderedTab] = window.scrollY;
+  }
 
   renderNav();
   renderSidebarFoot();
@@ -1052,6 +1059,17 @@ function render(){
       }
     }
   }
+  if(tabChanged){
+    requestAnimationFrame(()=>{
+      if(DETAIL_TABS.includes(ui.tab)){
+        window.scrollTo(0,0); // always start detail pages at the top, regardless of any saved position
+      } else {
+        const saved = (ui.scrollPositions && ui.scrollPositions[ui.tab]) || 0;
+        window.scrollTo(0, saved);
+      }
+    });
+  }
+  lastRenderedTab = ui.tab;
   syncStickyOffsets();
 }
 function el_contains_main(node){
@@ -2475,7 +2493,6 @@ function openItemDetail(id){
   ui.tab = 'item-detail';
   toggleSidebar(false);
   render();
-  window.scrollTo(0,0);
 }
 function viewItemDetail(){
   const p = getProduct(ui.selectedItemId);
@@ -2581,7 +2598,6 @@ function openAssetDetail(id){
   ui.tab = 'asset-detail';
   toggleSidebar(false);
   render();
-  window.scrollTo(0,0);
 }
 function viewAssetDetail(){
   const asset = getAsset(ui.selectedAssetId);
