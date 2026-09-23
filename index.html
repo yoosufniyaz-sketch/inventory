@@ -42,6 +42,8 @@
   html[data-theme="dark"] .bg-slate-100{ background-color: #334155; }
   html[data-theme="dark"] .bg-slate-50{ background-color: #1e293b; }
   html[data-theme="dark"] .bg-white{ background-color: #1e293b; }
+  .donut-hole{ fill: #fff; }
+  html[data-theme="dark"] .donut-hole{ fill: #1e293b; }
   html[data-theme="dark"] .border-slate-100{ border-color: #334155; }
   html[data-theme="dark"] .border-slate-200{ border-color: #334155; }
   html[data-theme="dark"] .border-slate-300{ border-color: #475569; }
@@ -1134,6 +1136,33 @@ function assetCategoryBreakdown(){
     map[cat] = (map[cat]||0) + 1;
   });
   return Object.entries(map).map(([category, count])=>({category, count})).sort((a,b)=>b.count-a.count);
+}
+function consumptionByLocation(productId){
+  const map = {};
+  state.movements.forEach(m=>{
+    if(m.productId!==productId || m.type!=='out') return;
+    map[m.locationId] = (map[m.locationId]||0) + (Number(m.quantity)||0);
+  });
+  return Object.entries(map)
+    .map(([locationId, qty])=>({ location: getLocation(locationId), qty }))
+    .filter(e=>e.qty>0)
+    .sort((a,b)=>b.qty-a.qty);
+}
+function donutChartSvg(segments, colors, size){
+  size = size || 160;
+  const r = size/2 - 10, cx = size/2, cy = size/2, circumference = 2*Math.PI*r;
+  const total = segments.reduce((s,x)=>s+x.value, 0);
+  if(total<=0) return '';
+  let offset = 0;
+  const circles = segments.map((seg,i)=>{
+    const frac = seg.value/total;
+    const dash = frac*circumference;
+    const gap = circumference - dash;
+    const circle = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="18" stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"></circle>`;
+    offset += dash;
+    return circle;
+  }).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${circles}<circle cx="${cx}" cy="${cy}" r="${r-9}" class="donut-hole"></circle></svg>`;
 }
 
 /* =====================================================================
@@ -2507,6 +2536,9 @@ function viewItemDetail(){
   const low = isLowStock(p);
   const total = productTotalQty(p);
   const history = state.movements.filter(m=>m.productId===p.id).sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,15);
+  const consumption = consumptionByLocation(p.id);
+  const consumptionTotal = consumption.reduce((s,c)=>s+c.qty,0);
+  const donutColors = ['#6366f1','#10b981','#f59e0b','#0ea5e9','#d946ef','#f43f5e','#14b8a6','#f97316'];
 
   return `
     <button onclick="goTo('products')" class="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline mb-4">← Back to Items</button>
@@ -2569,6 +2601,28 @@ function viewItemDetail(){
           </div>`;
         }).join('')}
       </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
+      <div class="text-sm font-bold text-slate-900 mb-1">Consumption rate by location</div>
+      <div class="text-xs text-slate-500 mb-5">Share of stock-out transactions per site</div>
+      ${consumptionTotal>0 ? `
+      <div class="flex flex-col sm:flex-row items-center gap-6">
+        <div class="shrink-0">${donutChartSvg(consumption.map(c=>({value:c.qty})), donutColors, 168)}</div>
+        <div class="flex-1 min-w-0 w-full space-y-2.5">
+          ${consumption.map((c,i)=>{
+            const pct = Math.round(c.qty/consumptionTotal*100);
+            return `
+            <div class="flex items-center justify-between gap-3 text-sm">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${donutColors[i % donutColors.length]}"></span>
+                <span class="text-slate-700 truncate">${c.location ? esc(c.location.name) : 'Unknown location'}</span>
+              </div>
+              <span class="text-slate-500 num shrink-0">${fmtNum(c.qty)} <span class="text-slate-400">(${pct}%)</span></span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>` : `<div class="text-center py-10 text-sm text-slate-400">No stock-out transactions logged for this item yet.</div>`}
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
