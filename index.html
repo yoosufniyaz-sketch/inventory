@@ -967,6 +967,22 @@ function closeModal(){
 document.getElementById('modal-overlay').addEventListener('click', (e)=>{
   if(e.target.id === 'modal-overlay') closeModal();
 });
+document.addEventListener('keydown', (e)=>{
+  const overlay = document.getElementById('modal-overlay');
+  if(overlay.classList.contains('hidden')) return;
+  if(e.key === 'Enter'){
+    const confirmBtn = document.getElementById('confirm-yes-btn');
+    if(confirmBtn){
+      // Don't intercept Enter while the user is typing in a textarea (multi-line input) inside the modal
+      const tag = document.activeElement ? document.activeElement.tagName : '';
+      if(tag === 'TEXTAREA') return;
+      e.preventDefault();
+      confirmBtn.click();
+    }
+  } else if(e.key === 'Escape'){
+    closeModal();
+  }
+});
 function confirmAction(message, onYes){
   openModal('Please confirm', `
     <p class="text-sm text-slate-700 mb-5">${esc(message)}</p>
@@ -996,6 +1012,7 @@ async function init(){
   if(Array.isArray(locations) && locations.length) LOCATIONS = locations;
   const cfg = getCloudConfig();
   if(cfg) cloudStatus = 'connecting'; // avoid a flash of the app before we know sign-in state
+  history.replaceState({ tab: ui.tab, selectedItemId: ui.selectedItemId, selectedAssetId: ui.selectedAssetId }, '', '#'+ui.tab);
   renderApp();
   if(cfg) initCloudIfConfigured();
 }
@@ -1021,6 +1038,7 @@ function renderApp(){
 }
 
 let lastRenderedTab = null;
+let isPopStateNav = false;
 const DETAIL_TABS = ['item-detail','asset-detail'];
 function render(){
   const activeEl = document.activeElement;
@@ -1032,6 +1050,9 @@ function render(){
   if(tabChanged){
     if(!ui.scrollPositions) ui.scrollPositions = {};
     ui.scrollPositions[lastRenderedTab] = window.scrollY;
+    if(!isPopStateNav){
+      history.pushState({ tab: ui.tab, selectedItemId: ui.selectedItemId, selectedAssetId: ui.selectedAssetId }, '', '#'+ui.tab);
+    }
   }
 
   renderNav();
@@ -1098,6 +1119,18 @@ function syncStickyOffsets(){
   });
 }
 window.addEventListener('resize', ()=>{ if(document.querySelector('.sticky-toolbar, .sticky-thead')) syncStickyOffsets(); });
+window.addEventListener('popstate', (e)=>{
+  const st = e.state;
+  if(st && st.tab){
+    isPopStateNav = true;
+    ui.tab = st.tab;
+    ui.selectedItemId = st.selectedItemId;
+    ui.selectedAssetId = st.selectedAssetId;
+    toggleSidebar(false);
+    render();
+    isPopStateNav = false;
+  }
+});
 function rerenderMain(){ render(); }
 
 init();
