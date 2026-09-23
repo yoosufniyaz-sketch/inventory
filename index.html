@@ -2555,8 +2555,9 @@ function viewItemDetail(){
         </div>
       </div>
       <div class="flex gap-2.5">
-        <button onclick="goTo('movements'); setTimeout(()=>{openMovementForm('in'); setTimeout(()=>selectMovementProduct('${p.id}'),0);},0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Stock In/Out</button>
-        ${canManageInventory() ? `<button onclick="openProductForm('${p.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">Edit</button>` : ''}
+        <button onclick="openMovementForm('in'); setTimeout(()=>selectMovementProduct('${p.id}'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
+        <button onclick="openMovementForm('out'); setTimeout(()=>selectMovementProduct('${p.id}'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
+        ${canManageInventory() ? `<button onclick="openProductForm('${p.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Edit</button>` : ''}
       </div>
     </div>
 
