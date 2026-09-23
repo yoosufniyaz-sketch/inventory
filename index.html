@@ -1394,8 +1394,13 @@ function viewProducts(){
     return `
       <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
         <td class="px-5 sm:px-6 py-3">
-          <div class="font-semibold text-slate-800"${p.description?(' title="'+esc(p.description)+'"'):''}>${esc(displayName(p))}</div>
-          <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
+          <div class="flex items-center gap-3">
+            ${p.image ? `<img src="${p.image}" alt="" class="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0">` : `<div class="w-9 h-9 rounded-lg bg-slate-100 shrink-0"></div>`}
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-800"${p.description?(' title="'+esc(p.description)+'"'):''}>${esc(displayName(p))}</div>
+              <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
+            </div>
+          </div>
         </td>
         <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">${esc(p.category||'Uncategorized')}</span></td>
         <td class="py-3 text-right num">${fmtNum(productTotalQty(p))}</td>
@@ -1470,6 +1475,17 @@ function openProductForm(id){
       </div>
     </div>
     <div class="text-[11px] text-slate-400 mb-4">Shown as: <span id="pf-name-preview" class="font-medium text-slate-500">${editing?esc(displayName(editing)):''}</span></div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Photo</label>
+      <div class="flex items-center gap-3">
+        <img id="pf-image-preview" src="${editing&&editing.image?editing.image:''}" class="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-slate-50 ${editing&&editing.image?'':'hidden'}" alt="">
+        <div class="flex-1 min-w-0">
+          <input type="file" id="pf-image-input" accept="image/*" onchange="handleImageSelect(event, 'pf')" class="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100">
+          <button type="button" id="pf-image-remove-btn" onclick="removeImage('pf')" class="text-[11px] text-rose-600 hover:underline mt-1 ${editing&&editing.image?'':'hidden'}">Remove photo</button>
+        </div>
+      </div>
+      <input type="hidden" id="pf-image-data" value="${editing&&editing.image?esc(editing.image):''}">
+    </div>
     <div class="mb-4">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
       <textarea id="pf-description" rows="2" placeholder="Optional — brief details about this item" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.description||''):''}</textarea>
@@ -1564,6 +1580,7 @@ function saveProduct(id){
     stock,
     reorderLevel: Number(document.getElementById('pf-reorder').value) || 0,
     reorderLevels,
+    image: document.getElementById('pf-image-data').value || '',
   };
   let savedProduct;
   if(id){
@@ -2548,7 +2565,7 @@ function viewAssetDetail(){
   `;
 }
 
-function handleAssetImageSelect(event){
+function handleImageSelect(event, prefix){
   const file = event.target.files[0];
   if(!file) return;
   if(!file.type.startsWith('image/')){ toast('Please select an image file.', true); return; }
@@ -2566,9 +2583,9 @@ function handleAssetImageSelect(event){
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
-      const dataInput = document.getElementById('af-image-data');
-      const preview = document.getElementById('af-image-preview');
-      const removeBtn = document.getElementById('af-image-remove-btn');
+      const dataInput = document.getElementById(prefix+'-image-data');
+      const preview = document.getElementById(prefix+'-image-preview');
+      const removeBtn = document.getElementById(prefix+'-image-remove-btn');
       if(dataInput) dataInput.value = dataUrl;
       if(preview){ preview.src = dataUrl; preview.classList.remove('hidden'); }
       if(removeBtn) removeBtn.classList.remove('hidden');
@@ -2579,11 +2596,11 @@ function handleAssetImageSelect(event){
   reader.onerror = function(){ toast('Could not read that image — try a different file.', true); };
   reader.readAsDataURL(file);
 }
-function removeAssetImage(){
-  const dataInput = document.getElementById('af-image-data');
-  const preview = document.getElementById('af-image-preview');
-  const removeBtn = document.getElementById('af-image-remove-btn');
-  const fileInput = document.getElementById('af-image-input');
+function removeImage(prefix){
+  const dataInput = document.getElementById(prefix+'-image-data');
+  const preview = document.getElementById(prefix+'-image-preview');
+  const removeBtn = document.getElementById(prefix+'-image-remove-btn');
+  const fileInput = document.getElementById(prefix+'-image-input');
   if(dataInput) dataInput.value = '';
   if(preview){ preview.src = ''; preview.classList.add('hidden'); }
   if(removeBtn) removeBtn.classList.add('hidden');
@@ -2635,8 +2652,8 @@ function openAssetForm(id){
       <div class="flex items-center gap-3">
         <img id="af-image-preview" src="${editing&&editing.image?editing.image:''}" class="w-16 h-16 rounded-lg object-cover border border-slate-200 bg-slate-50 ${editing&&editing.image?'':'hidden'}" alt="">
         <div class="flex-1 min-w-0">
-          <input type="file" id="af-image-input" accept="image/*" onchange="handleAssetImageSelect(event)" class="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100">
-          <button type="button" id="af-image-remove-btn" onclick="removeAssetImage()" class="text-[11px] text-rose-600 hover:underline mt-1 ${editing&&editing.image?'':'hidden'}">Remove photo</button>
+          <input type="file" id="af-image-input" accept="image/*" onchange="handleImageSelect(event, 'af')" class="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100">
+          <button type="button" id="af-image-remove-btn" onclick="removeImage('af')" class="text-[11px] text-rose-600 hover:underline mt-1 ${editing&&editing.image?'':'hidden'}">Remove photo</button>
         </div>
       </div>
       <input type="hidden" id="af-image-data" value="${editing&&editing.image?esc(editing.image):''}">
