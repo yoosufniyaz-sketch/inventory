@@ -1833,6 +1833,32 @@ function costValuationByItem(){
     .filter(e=>e.product)
     .sort((a,b)=>b.totalCost-a.totalCost);
 }
+function costValuationByCategory(){
+  const map = {};
+  costValuationByItem().forEach(e=>{
+    const cat = (e.product.category||'').trim() || 'Uncategorized';
+    map[cat] = (map[cat]||0) + e.totalCost;
+  });
+  return Object.entries(map)
+    .map(([category, totalCost])=>({category, totalCost}))
+    .filter(e=>e.totalCost>0)
+    .sort((a,b)=>b.totalCost-a.totalCost);
+}
+function globalMonthlyCostSeries(year){
+  const purchaseCost = new Array(12).fill(0);
+  const consumptionCost = new Array(12).fill(0);
+  state.movements.forEach(m=>{
+    if(!m.date || m.date.slice(0,4) !== String(year)) return;
+    const monthIdx = Number(m.date.slice(5,7)) - 1;
+    if(monthIdx<0 || monthIdx>11) return;
+    const p = getProduct(m.productId);
+    if(!p) return;
+    const cost = (Number(m.quantity)||0) * (Number(p.estimatedCost)||0);
+    if(m.type==='in') purchaseCost[monthIdx] += cost;
+    else if(m.type==='out') consumptionCost[monthIdx] += cost;
+  });
+  return { purchaseCost, consumptionCost };
+}
 function hasActiveMovementFilters(){
   const f = ui.movementsFilter;
   return !!(f.search || f.type || f.locationId || f.acquisition || f.dateFrom || f.dateTo);
@@ -2105,6 +2131,13 @@ function viewMovements(){
   const isValuation = ui.movementsView==='valuation';
   const valuation = isValuation ? costValuationByItem() : [];
   const valuationGrandTotal = valuation.reduce((s,v)=>s+v.totalCost,0);
+  const categoryValuation = isValuation ? costValuationByCategory() : [];
+  const categoryTotal = categoryValuation.reduce((s,c)=>s+c.totalCost,0);
+  const categoryColors = ['#6366f1','#10b981','#f59e0b','#0ea5e9','#d946ef','#f43f5e','#14b8a6','#f97316'];
+  const currentYear = new Date().getFullYear();
+  const trendSeries = isValuation ? globalMonthlyCostSeries(currentYear) : null;
+  const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const hasTrendActivity = trendSeries && (trendSeries.purchaseCost.some(v=>v>0) || trendSeries.consumptionCost.some(v=>v>0));
 
   return `
     <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
@@ -2125,10 +2158,55 @@ function viewMovements(){
     </div>
 
     ${isValuation ? `
-    <div class="bg-white rounded-xl border border-slate-200 border-l-4 border-l-brand-500 p-4 mb-4 max-w-xs">
+    <div class="bg-white rounded-xl border border-slate-200 border-l-4 border-l-brand-500 p-4 mb-6 max-w-xs">
       <div class="text-xs font-medium text-slate-500">Total consumption expense</div>
       <div class="text-xl font-extrabold text-slate-900 mt-0.5 num">${fmtMVR(valuationGrandTotal)}</div>
     </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+      <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+        <div class="text-sm font-bold text-slate-900 mb-1">Cost valuation by category</div>
+        <div class="text-xs text-slate-500 mb-5">Where consumption expense is going</div>
+        ${categoryValuation.length ? `
+        <div class="flex flex-col sm:flex-row items-center gap-6">
+          <div class="shrink-0">${donutChartSvg(categoryValuation.map(c=>({value:c.totalCost})), categoryColors, 168)}</div>
+          <div class="flex-1 min-w-0 w-full space-y-2.5">
+            ${categoryValuation.map((c,i)=>{
+              const pct = categoryTotal>0 ? Math.round(c.totalCost/categoryTotal*100) : 0;
+              return `
+              <div class="flex items-center justify-between gap-3 text-sm">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${categoryColors[i % categoryColors.length]}"></span>
+                  <span class="text-slate-700 truncate">${esc(c.category)}</span>
+                </div>
+                <span class="text-slate-500 num shrink-0">${fmtMVR(c.totalCost)} <span class="text-slate-400">(${pct}%)</span></span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>` : `<div class="text-center py-10 text-sm text-slate-400">No consumption logged yet.</div>`}
+      </div>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+        <div class="flex items-center justify-between gap-3 mb-1 flex-wrap">
+          <div class="text-sm font-bold text-slate-900">Stock in / out trend — ${currentYear}</div>
+          <div class="flex items-center gap-4 text-xs">
+            <span class="flex items-center gap-1.5 text-slate-600"><span class="w-2.5 h-0.5 rounded-full" style="background:#10b981"></span>Stock in</span>
+            <span class="flex items-center gap-1.5 text-slate-600"><span class="w-2.5 h-0.5 rounded-full" style="background:#f43f5e"></span>Stock out</span>
+          </div>
+        </div>
+        <div class="text-xs text-slate-500 mb-5">Monthly value of stock purchased vs. consumed, across all items (MVR)</div>
+        ${hasTrendActivity ? `
+        <div class="w-full overflow-x-auto">
+          <div class="min-w-[420px]">
+            ${lineChartSvg([
+              { name:'Stock in', color:'#10b981', values: trendSeries.purchaseCost },
+              { name:'Stock out', color:'#f43f5e', values: trendSeries.consumptionCost },
+            ], monthLabels, 480, 220)}
+          </div>
+        </div>` : `<div class="text-center py-10 text-sm text-slate-400">No stock movements logged for ${currentYear} yet.</div>`}
+      </div>
+    </div>
+
     <div class="bg-white rounded-xl border border-slate-200">
       ${valuation.length ? `
       <div class="w-full">
@@ -2221,38 +2299,57 @@ function viewMovements(){
   `;
 }
 
-function movementProductOptionsHtml(filterText){
-  const f = (filterText||'').trim().toLowerCase();
-  const list = [...state.products].sort(byDisplayName).filter(p=>{
-    if(!f) return true;
-    return (p.name+' '+(p.variant||'')+' '+(p.sku||'')).toLowerCase().includes(f);
-  });
-  if(!list.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No items match "${esc(filterText)}".</div>`;
-  return list.map(p=>`
-    <button type="button" onmousedown="event.preventDefault(); selectMovementProduct('${p.id}')" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
-      <span class="truncate">${esc(displayName(p))}</span>
-      <span class="text-[11px] text-slate-400 shrink-0 ml-2">${esc(p.sku||'')}</span>
-    </button>
-  `).join('');
+function getUniqueItemNames(){
+  return [...new Set(state.products.map(p=>p.name))].sort((a,b)=>a.localeCompare(b));
 }
-function filterMovementProducts(clearSelection){
-  const input = document.getElementById('mf-product-search');
-  const dropdown = document.getElementById('mf-product-dropdown');
+function movementItemOptionsHtml(filterText){
+  const f = (filterText||'').trim().toLowerCase();
+  const names = getUniqueItemNames().filter(n=> !f || n.toLowerCase().includes(f));
+  if(!names.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No items match "${esc(filterText)}".</div>`;
+  return names.map(n=>{
+    const count = state.products.filter(p=>p.name===n).length;
+    return `
+    <button type="button" data-name="${esc(n)}" onmousedown="event.preventDefault(); selectMovementItemName(this.dataset.name)" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+      <span class="truncate">${esc(n)}</span>
+      ${count>1 ? `<span class="text-[11px] text-slate-400 shrink-0 ml-2">${count} variants</span>` : ''}
+    </button>`;
+  }).join('');
+}
+function filterMovementItems(){
+  const input = document.getElementById('mf-item-search');
+  const dropdown = document.getElementById('mf-item-dropdown');
   if(!input || !dropdown) return;
-  if(clearSelection) document.getElementById('mf-product').value = '';
-  const query = clearSelection ? input.value : '';
-  dropdown.innerHTML = movementProductOptionsHtml(query);
+  dropdown.innerHTML = movementItemOptionsHtml(input.value);
   dropdown.classList.remove('hidden');
+}
+function hideMovementItemDropdown(){
+  setTimeout(()=>{ const d = document.getElementById('mf-item-dropdown'); if(d) d.classList.add('hidden'); }, 150);
+}
+function selectMovementItemName(name){
+  document.getElementById('mf-item-search').value = name;
+  document.getElementById('mf-item-dropdown').classList.add('hidden');
+  populateMovementVariants(name);
+}
+function populateMovementVariants(name){
+  const variants = state.products.filter(p=>p.name===name).sort(byDisplayName);
+  const sel = document.getElementById('mf-variant');
+  if(!sel) return;
+  sel.innerHTML = variants.map(p=>`<option value="${p.id}">${esc(p.variant&&p.variant.trim()?p.variant.trim():'Standard')}${p.sku?(' — '+esc(p.sku)):''}</option>`).join('');
+  document.getElementById('mf-product').value = variants.length ? variants[0].id : '';
+  updateMovementHint();
+}
+function selectMovementVariant(){
+  document.getElementById('mf-product').value = document.getElementById('mf-variant').value;
+  updateMovementHint();
 }
 function selectMovementProduct(id){
   const p = getProduct(id);
+  if(!p) return;
   document.getElementById('mf-product').value = id;
-  document.getElementById('mf-product-search').value = p ? (displayName(p) + (p.sku?(' — '+p.sku):'')) : '';
-  document.getElementById('mf-product-dropdown').classList.add('hidden');
+  document.getElementById('mf-item-search').value = p.name;
+  populateMovementVariants(p.name);
+  document.getElementById('mf-variant').value = id;
   updateMovementHint();
-}
-function hideMovementProductDropdown(){
-  setTimeout(()=>{ const d = document.getElementById('mf-product-dropdown'); if(d) d.classList.add('hidden'); }, 150);
 }
 function openMovementForm(type){
   if(state.products.length===0){ toast('Add at least one item before logging stock movements.', true); return; }
@@ -2264,15 +2361,19 @@ function openMovementForm(type){
     <div class="mb-4">
       <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${isIn?'bg-emerald-100 text-emerald-700':'bg-rose-100 text-rose-700'}">${isIn?'Stock In':'Stock Out'}</span>
     </div>
-    <div class="grid grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
       <div class="relative">
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
-        <input type="text" id="mf-product-search" autocomplete="off" placeholder="Search by name or SKU…"
-          value="${esc(displayName(defaultProduct) + (defaultProduct.sku?(' — '+defaultProduct.sku):''))}"
-          oninput="filterMovementProducts(true)" onfocus="this.select(); filterMovementProducts(false);" onblur="hideMovementProductDropdown()"
+        <input type="text" id="mf-item-search" autocomplete="off" placeholder="Search items…"
+          value="${esc(defaultProduct.name)}"
+          oninput="filterMovementItems()" onfocus="this.select(); filterMovementItems();" onblur="hideMovementItemDropdown()"
           class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <div id="mf-item-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant *</label>
+        <select id="mf-variant" onchange="selectMovementVariant()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white"></select>
         <input type="hidden" id="mf-product" value="${defaultProduct.id}">
-        <div id="mf-product-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
@@ -2321,7 +2422,9 @@ function openMovementForm(type){
       <button class="px-4 py-2 rounded-lg text-sm font-semibold text-white ${isIn?'bg-emerald-600 hover:bg-emerald-700':'bg-rose-600 hover:bg-rose-700'}" onclick="saveMovement('${type}')">${isIn?'Log Stock In':'Log Stock Out'}</button>
     </div>
   `;
-  openModal(isIn?'Log Stock In':'Log Stock Out', body);
+  openModal(isIn?'Log Stock In':'Log Stock Out', body, true);
+  populateMovementVariants(defaultProduct.name);
+  document.getElementById('mf-variant').value = defaultProduct.id;
   updateMovementHint();
 }
 function updateMovementHint(){
