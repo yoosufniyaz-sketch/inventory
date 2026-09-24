@@ -44,6 +44,9 @@
   html[data-theme="dark"] .bg-white{ background-color: #1e293b; }
   .donut-hole{ fill: #fff; }
   html[data-theme="dark"] .donut-hole{ fill: #1e293b; }
+  .chart-gridline{ color: #e2e8f0; }
+  html[data-theme="dark"] .chart-gridline{ color: #334155; }
+  .chart-axis-label{ fill: #94a3b8; }
   html[data-theme="dark"] .border-slate-100{ border-color: #334155; }
   html[data-theme="dark"] .border-slate-200{ border-color: #334155; }
   html[data-theme="dark"] .border-slate-300{ border-color: #475569; }
@@ -148,6 +151,7 @@ const ui = {
   tab: 'dashboard',
   productsFilter: { search:'', category:'' },
   movementsFilter: { search:'', type:'', locationId:'', acquisition:'', dateFrom:'', dateTo:'' },
+  movementsView: 'log',
   assetsFilter: { search:'', locationId:'', department:'' },
   assetTransactionsFilter: { search:'', locationId:'', dateFrom:'', dateTo:'' },
   selectedAssetId: null,
@@ -873,6 +877,7 @@ function fmtDate(d){
   return dt.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
 }
 function fmtNum(n){ return (Number(n)||0).toLocaleString(undefined, { maximumFractionDigits:2 }); }
+function fmtMVR(n){ return 'MVR ' + (Number(n)||0).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); }
 function byName(a,b){ return (a.name||'').localeCompare(b.name||''); }
 function byTag(a,b){
   const ta = (a.tag||'').trim(), tb = (b.tag||'').trim();
@@ -1198,6 +1203,46 @@ function donutChartSvg(segments, colors, size){
     return circle;
   }).join('');
   return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${circles}<circle cx="${cx}" cy="${cy}" r="${r-9}" class="donut-hole"></circle></svg>`;
+}
+function monthlyCostSeries(productId, year){
+  const p = getProduct(productId);
+  const unitCost = p ? (Number(p.estimatedCost)||0) : 0;
+  const purchaseCost = new Array(12).fill(0);
+  const consumptionCost = new Array(12).fill(0);
+  state.movements.forEach(m=>{
+    if(m.productId!==productId) return;
+    if(!m.date || m.date.slice(0,4) !== String(year)) return;
+    const monthIdx = Number(m.date.slice(5,7)) - 1;
+    if(monthIdx<0 || monthIdx>11) return;
+    const cost = (Number(m.quantity)||0) * unitCost;
+    if(m.type==='in') purchaseCost[monthIdx] += cost;
+    else if(m.type==='out') consumptionCost[monthIdx] += cost;
+  });
+  return { purchaseCost, consumptionCost };
+}
+function lineChartSvg(series, labels, width, height){
+  width = width || 640; height = height || 220;
+  const padL = 56, padR = 16, padT = 16, padB = 28;
+  const plotW = width - padL - padR, plotH = height - padT - padB;
+  const n = labels.length;
+  const maxY = Math.max(1, ...series.flatMap(s=>s.values));
+  const niceMax = maxY <= 0 ? 1 : Math.pow(10, Math.ceil(Math.log10(maxY))) ;
+  const yMax = maxY / niceMax > 0.5 ? niceMax : niceMax/2 || niceMax;
+  const xAt = i => padL + (n<=1 ? 0 : (i/(n-1))*plotW);
+  const yAt = v => padT + plotH - (Math.min(v,yMax)/yMax)*plotH;
+  const gridLines = [0,0.25,0.5,0.75,1].map(f=>{
+    const y = padT + plotH - f*plotH;
+    const val = f*yMax;
+    return `<line x1="${padL}" y1="${y}" x2="${width-padR}" y2="${y}" stroke="currentColor" class="chart-gridline" stroke-width="1"></line>
+      <text x="${padL-8}" y="${y+3}" text-anchor="end" font-size="10" class="chart-axis-label">${fmtNum(val)}</text>`;
+  }).join('');
+  const xLabels = labels.map((lab,i)=>`<text x="${xAt(i)}" y="${height-8}" text-anchor="middle" font-size="10" class="chart-axis-label">${esc(lab)}</text>`).join('');
+  const lines = series.map(s=>{
+    const pts = s.values.map((v,i)=>`${xAt(i)},${yAt(v)}`).join(' ');
+    const dots = s.values.map((v,i)=>`<circle cx="${xAt(i)}" cy="${yAt(v)}" r="3" fill="${s.color}"></circle>`).join('');
+    return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></polyline>${dots}`;
+  }).join('');
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="xMinYMid meet">${gridLines}${lines}${xLabels}</svg>`;
 }
 
 /* =====================================================================
@@ -1621,6 +1666,11 @@ function openProductForm(id){
         <div class="text-[11px] text-slate-400 mt-1.5">Flags this item as low stock once any location's own quantity falls to or below that location's threshold. Leave a location blank to skip it.</div>
       </div>
     </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Estimated cost (MVR)</label>
+      <input type="number" min="0" step="any" id="pf-cost" value="${editing&&editing.estimatedCost!=null?editing.estimatedCost:''}" placeholder="0.00" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <div class="text-[11px] text-slate-400 mt-1.5">Per-unit cost, used for cost valuation and the item's cost history chart.</div>
+    </div>
     <div class="flex justify-end gap-2.5">
       <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
       <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveProduct('${editing?editing.id:''}')">${editing?'Save changes':'Add item'}</button>
@@ -1665,6 +1715,7 @@ function saveProduct(id){
     reorderLevel: Number(document.getElementById('pf-reorder').value) || 0,
     reorderLevels,
     image: document.getElementById('pf-image-data').value || '',
+    estimatedCost: document.getElementById('pf-cost').value !== '' ? Number(document.getElementById('pf-cost').value) : 0,
   };
   let savedProduct;
   if(id){
@@ -1731,7 +1782,7 @@ function movementRow(m, compact){
     </tr>`;
 }
 function acquisitionLabel(m){
-  if(m.type!=='in' || !m.acquisition) return '—';
+  if(!m.acquisition) return '—';
   return esc(m.acquisition);
 }
 function issuedToLabel(m){
@@ -1765,6 +1816,22 @@ function acquisitionBreakdown(list){
     if(m.type==='in' && m.acquisition && map.hasOwnProperty(m.acquisition)) map[m.acquisition] += m.quantity;
   });
   return map;
+}
+function costValuationByItem(){
+  const map = {};
+  state.movements.forEach(m=>{
+    if(m.type!=='out') return;
+    if(!map[m.productId]) map[m.productId] = 0;
+    map[m.productId] += Number(m.quantity)||0;
+  });
+  return Object.entries(map)
+    .map(([productId, qty])=>{
+      const p = getProduct(productId);
+      const unitCost = p ? (Number(p.estimatedCost)||0) : 0;
+      return { product: p, qtyConsumed: qty, unitCost, totalCost: qty * unitCost };
+    })
+    .filter(e=>e.product)
+    .sort((a,b)=>b.totalCost-a.totalCost);
 }
 function hasActiveMovementFilters(){
   const f = ui.movementsFilter;
@@ -2035,6 +2102,9 @@ function viewMovements(){
   const acqBreakdown = acquisitionBreakdown(list);
   const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
   const acqOptions = ACQUISITION_TYPES.map(a=>`<option value="${esc(a)}" ${f.acquisition===a?'selected':''}>${esc(a)}</option>`).join('');
+  const isValuation = ui.movementsView==='valuation';
+  const valuation = isValuation ? costValuationByItem() : [];
+  const valuationGrandTotal = valuation.reduce((s,v)=>s+v.totalCost,0);
 
   return `
     <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
@@ -2043,11 +2113,47 @@ function viewMovements(){
         <p class="text-sm text-slate-500 mt-0.5">Log stock coming in and going out, and generate a report for any period.</p>
       </div>
       <div class="flex gap-2.5 flex-wrap">
-        <button onclick="exportMovementsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export report (CSV)</button>
+        ${!isValuation ? `<button onclick="exportMovementsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export report (CSV)</button>` : ''}
         <button onclick="openMovementForm('in')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
         <button onclick="openMovementForm('out')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
       </div>
     </div>
+
+    <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1 mb-6">
+      <button onclick="ui.movementsView='log'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${!isValuation?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Movement Log</button>
+      <button onclick="ui.movementsView='valuation'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${isValuation?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Cost Valuation</button>
+    </div>
+
+    ${isValuation ? `
+    <div class="bg-white rounded-xl border border-slate-200 border-l-4 border-l-brand-500 p-4 mb-4 max-w-xs">
+      <div class="text-xs font-medium text-slate-500">Total consumption expense</div>
+      <div class="text-xl font-extrabold text-slate-900 mt-0.5 num">${fmtMVR(valuationGrandTotal)}</div>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200">
+      ${valuation.length ? `
+      <div class="w-full">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Item</th>
+            <th class="py-3 font-semibold text-right">Qty consumed</th>
+            <th class="py-3 font-semibold text-right">Unit cost</th>
+            <th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Total expense</th>
+          </tr></thead>
+          <tbody>${valuation.map(v=>`
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-5 sm:px-6 py-3 font-medium text-slate-800">${esc(displayName(v.product))}</td>
+              <td class="py-3 text-right num">${fmtNum(v.qtyConsumed)}</td>
+              <td class="py-3 text-right num text-slate-500">${fmtMVR(v.unitCost)}</td>
+              <td class="py-3 pr-5 sm:pr-6 text-right num font-bold text-slate-900">${fmtMVR(v.totalCost)}</td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No consumption logged yet</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto">Log a Stock Out and set an estimated cost on your items to see expense valuation here.</p>
+      </div>`}
+    </div>
+    ` : `
 
     <div class="sticky-toolbar sticky-toolbar-card bg-white rounded-xl border border-slate-200 p-4 sm:p-5 mb-4">
       <div class="flex flex-wrap gap-2.5">
@@ -2111,6 +2217,7 @@ function viewMovements(){
         <p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">${hasActiveMovementFilters()?'Try widening the date range or clearing a filter.':'Log a Stock In or Stock Out to start tracking activity — quantities update automatically.'}</p>
       </div>`}
     </div>
+    `}
   `;
 }
 
@@ -2185,16 +2292,15 @@ function openMovementForm(type){
         <input type="date" id="mf-date" value="${todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
     </div>
-    ${isIn ? `
     <div class="mb-5">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Acquisition *</label>
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">${isIn?'Acquisition':'Consumption from'} *</label>
       <select id="mf-acquisition" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
         <option value="">Select…</option>
         <option value="Purchase Order">Purchase Order</option>
         <option value="CSR">CSR</option>
         <option value="Petty Cash">Petty Cash</option>
       </select>
-    </div>` : ''}
+    </div>
     <div class="mb-5">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / reference</label>
       <input type="text" id="mf-reason" placeholder="${isIn?'e.g. Restock from supplier':'e.g. Sold to customer, damaged'}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
@@ -2234,7 +2340,7 @@ function saveMovement(type){
   const qty = Number(document.getElementById('mf-qty').value);
   const date = document.getElementById('mf-date').value;
   const reason = document.getElementById('mf-reason').value.trim();
-  const acquisition = type==='in' ? document.getElementById('mf-acquisition').value : '';
+  const acquisition = document.getElementById('mf-acquisition').value;
   const department = type==='out' ? document.getElementById('mf-department').value.trim() : '';
   const staffName = type==='out' ? document.getElementById('mf-staffname').value.trim() : '';
   const p = getProduct(productId);
@@ -2244,7 +2350,7 @@ function saveMovement(type){
   if(!loc) { errEl.textContent='Choose a location.'; errEl.classList.remove('hidden'); return; }
   if(!qty || qty<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
   if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
-  if(type==='in' && !acquisition){ errEl.textContent='Choose how this stock was acquired.'; errEl.classList.remove('hidden'); return; }
+  if(!acquisition){ errEl.textContent = type==='in' ? 'Choose how this stock was acquired.' : 'Choose what this consumption should be attributed to.'; errEl.classList.remove('hidden'); return; }
   const currentAtLoc = qtyAt(p, locationId);
   if(type==='out' && qty > currentAtLoc){
     errEl.textContent = `Only ${fmtNum(currentAtLoc)} in stock at ${loc.name} — reduce the quantity or log a Stock In first.`;
@@ -2572,6 +2678,10 @@ function viewItemDetail(){
   const total = productTotalQty(p);
   const history = state.movements.filter(m=>m.productId===p.id).sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,15);
   const locMovements = movementsByLocation(p.id);
+  const currentYear = new Date().getFullYear();
+  const costSeries = monthlyCostSeries(p.id, currentYear);
+  const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const hasCostActivity = costSeries.purchaseCost.some(v=>v>0) || costSeries.consumptionCost.some(v=>v>0);
 
   return `
     <button onclick="goTo('products')" class="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline mb-4">← Back to Items</button>
@@ -2663,6 +2773,26 @@ function viewItemDetail(){
           </div>`;
         }).join('')}
       </div>` : `<div class="text-center py-10 text-sm text-slate-400">No stock movements logged for this item yet.</div>`}
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
+      <div class="flex items-center justify-between gap-3 mb-1 flex-wrap">
+        <div class="text-sm font-bold text-slate-900">Cost history — ${currentYear}</div>
+        <div class="flex items-center gap-4 text-xs">
+          <span class="flex items-center gap-1.5 text-slate-600"><span class="w-2.5 h-0.5 rounded-full" style="background:#10b981"></span>Purchase cost</span>
+          <span class="flex items-center gap-1.5 text-slate-600"><span class="w-2.5 h-0.5 rounded-full" style="background:#f43f5e"></span>Consumption cost</span>
+        </div>
+      </div>
+      <div class="text-xs text-slate-500 mb-5">Monthly value of stock purchased vs. consumed, based on this item's estimated cost (MVR)</div>
+      ${hasCostActivity ? `
+      <div class="w-full overflow-x-auto">
+        <div class="min-w-[560px]">
+          ${lineChartSvg([
+            { name:'Purchase cost', color:'#10b981', values: costSeries.purchaseCost },
+            { name:'Consumption cost', color:'#f43f5e', values: costSeries.consumptionCost },
+          ], monthLabels, 640, 220)}
+        </div>
+      </div>` : `<div class="text-center py-10 text-sm text-slate-400">${p.estimatedCost ? `No stock movements logged for ${currentYear} yet.` : 'Set an estimated cost on this item to see its cost history here.'}</div>`}
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
