@@ -1780,7 +1780,7 @@ function movementRow(m, compact){
       <td class="py-3 text-slate-500">${esc(m.reason||'—')}</td>
       <td class="py-3 text-slate-500">${issuedToLabel(m)}</td>
       <td class="py-3 text-slate-500">${esc(m.loggedByName||'—')}</td>
-      <td class="py-3 pr-5 sm:pr-6 text-right">${canManageInventory() ? `<button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}</td>
+      <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">${canManageInventory() ? `<button onclick="openEditMovementForm('${m.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button><button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}</td>
     </tr>`;
 }
 function acquisitionLabel(m){
@@ -2396,6 +2396,144 @@ function selectMovementProduct(id){
   populateMovementVariants(p.name);
   document.getElementById('mf-variant').value = id;
   updateMovementHint();
+}
+function openEditMovementForm(id){
+  if(!canManageInventory()){ toast('Only admins can edit stock movements.', true); return; }
+  const m = state.movements.find(x=>x.id===id);
+  if(!m){ toast('That movement could not be found.', true); return; }
+  const isIn = m.type==='in';
+  const p = getProduct(m.productId);
+  const body = `
+    <div id="mf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-4">
+      <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${isIn?'bg-emerald-100 text-emerald-700':'bg-rose-100 text-rose-700'}">${isIn?'Stock In':'Stock Out'}</span>
+      <span class="text-[11px] text-slate-400 ml-2">Type can't be changed — delete and re-log this movement if it was the wrong direction.</span>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+      <div class="relative">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
+        <input type="text" id="mf-item-search" autocomplete="off" placeholder="Search items…"
+          value="${p?esc(p.name):''}"
+          oninput="filterMovementItems()" onfocus="this.select(); filterMovementItems();" onblur="hideMovementItemDropdown()"
+          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <div id="mf-item-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant *</label>
+        <select id="mf-variant" onchange="selectMovementVariant()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white"></select>
+        <input type="hidden" id="mf-product" value="${m.productId}">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
+        <select id="mf-location" onchange="updateMovementHint()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${LOCATIONS.map(l=>`<option value="${l.id}" ${l.id===m.locationId?'selected':''}>${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="mf-hint" class="text-[11.5px] text-slate-400 -mt-2 mb-4"></div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
+        <input type="number" min="0" step="any" id="mf-qty" value="${m.quantity}" oninput="updateMovementHint()" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
+        <input type="date" id="mf-date" value="${esc(m.date)}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">${isIn?'Acquisition':'Consumption from'} *</label>
+      <select id="mf-acquisition" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <option value="">Select…</option>
+        <option value="Purchase Order" ${m.acquisition==='Purchase Order'?'selected':''}>Purchase Order</option>
+        <option value="CSR" ${m.acquisition==='CSR'?'selected':''}>CSR</option>
+        <option value="Petty Cash" ${m.acquisition==='Petty Cash'?'selected':''}>Petty Cash</option>
+      </select>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / reference</label>
+      <input type="text" id="mf-reason" value="${esc(m.reason||'')}" placeholder="${isIn?'e.g. Restock from supplier':'e.g. Sold to customer, damaged'}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    ${!isIn ? `
+    <div class="grid grid-cols-2 gap-4 mb-5">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
+        <input type="text" id="mf-department" value="${esc(m.department||'')}" placeholder="e.g. Operations" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Staff name</label>
+        <input type="text" id="mf-staffname" value="${esc(m.staffName||'')}" placeholder="Who is it issued to?" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>` : ''}
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold text-white ${isIn?'bg-emerald-600 hover:bg-emerald-700':'bg-rose-600 hover:bg-rose-700'}" onclick="saveMovementEdit('${m.id}')">Save changes</button>
+    </div>
+  `;
+  openModal('Edit ' + (isIn?'Stock In':'Stock Out'), body, true);
+  if(p) selectMovementProduct(p.id);
+}
+function saveMovementEdit(id){
+  if(!canManageInventory()){ toast('Only admins can edit stock movements.', true); return; }
+  const m = state.movements.find(x=>x.id===id);
+  if(!m){ toast('That movement could not be found.', true); return; }
+  const errEl = document.getElementById('mf-error');
+  errEl.classList.add('hidden');
+  const productId = document.getElementById('mf-product').value;
+  const locationId = document.getElementById('mf-location').value;
+  const qty = Number(document.getElementById('mf-qty').value);
+  const date = document.getElementById('mf-date').value;
+  const reason = document.getElementById('mf-reason').value.trim();
+  const acquisition = document.getElementById('mf-acquisition').value;
+  const department = m.type==='out' ? document.getElementById('mf-department').value.trim() : '';
+  const staffName = m.type==='out' ? document.getElementById('mf-staffname').value.trim() : '';
+  const newProduct = getProduct(productId);
+  const newLoc = getLocation(locationId);
+
+  if(!newProduct){ errEl.textContent='Choose an item.'; errEl.classList.remove('hidden'); return; }
+  if(!newLoc){ errEl.textContent='Choose a location.'; errEl.classList.remove('hidden'); return; }
+  if(!qty || qty<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
+  if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
+  if(!acquisition){ errEl.textContent = m.type==='in' ? 'Choose how this stock was acquired.' : 'Choose what this consumption should be attributed to.'; errEl.classList.remove('hidden'); return; }
+
+  // Reverse the old movement's effect on the old product/location first
+  const oldProduct = getProduct(m.productId);
+  if(oldProduct && oldProduct.stock){
+    const curOld = qtyAt(oldProduct, m.locationId);
+    oldProduct.stock[m.locationId] = m.type==='in' ? curOld - m.quantity : curOld + m.quantity;
+  }
+
+  // Validate the new effect won't take a Stock Out below zero (checking against the ALREADY-reversed baseline if it's the same product/location)
+  const currentAtNewLoc = qtyAt(newProduct, locationId);
+  if(m.type==='out' && qty > currentAtNewLoc){
+    errEl.textContent = `Only ${fmtNum(currentAtNewLoc)} in stock at ${newLoc.name} — reduce the quantity or log a Stock In first.`;
+    errEl.classList.remove('hidden');
+    // Undo the reversal above since we're bailing out
+    if(oldProduct && oldProduct.stock){
+      const curOld = qtyAt(oldProduct, m.locationId);
+      oldProduct.stock[m.locationId] = m.type==='in' ? curOld + m.quantity : curOld - m.quantity;
+    }
+    return;
+  }
+
+  if(!newProduct.stock) newProduct.stock = {};
+  newProduct.stock[locationId] = m.type==='in' ? currentAtNewLoc + qty : currentAtNewLoc - qty;
+
+  m.productId = productId;
+  m.locationId = locationId;
+  m.quantity = qty;
+  m.date = date;
+  m.reason = reason;
+  m.acquisition = acquisition;
+  m.department = department;
+  m.staffName = staffName;
+
+  if(oldProduct) persistItemDoc(oldProduct);
+  if(newProduct !== oldProduct) persistItemDoc(newProduct);
+  persistMovementDoc(m);
+  closeModal();
+  toast('Movement updated.');
+  rerenderMain();
 }
 function openMovementForm(type){
   if(state.products.length===0){ toast('Add at least one item before logging stock movements.', true); return; }
