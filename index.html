@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FDC Inventory</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA0UlEQVR4nO2XMQ7CMAxFn5sWBKhCLHALdq7BHTgcG0fgBgysHAEJ1AUEjc3SIjE2lYhAsZQxzsu3LX0LYESMLObjAHnoRSef7N40KI8QuQRBChTiWM+WTLIBiqFm7C5HKr13/lEngDb5UByb+YpFUVKb4k3ZVycqvdNV1CAFDLjWNwbi3gAaWMleTegk691A0ccwASSABJAAEkACSAAJIBjAN1asPaERZMkEmOYjZvmYpynePBnyPYCHebbnA6Uboihq1jji7vGbiwn80WoWfQxfvWZQ6gKBucwAAAAASUVORK5CYII=">
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAADDklEQVR4nO3cvYokVRiA4e90t38ruDBGmhmKNyJ4vcaG3oGRCGYmizKOqzM702WyiIGB9haM+87zQFX49aF4OX2ooNbMbAMRh8deAOxJ0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJOT32At5Wa2bW6/vec8+zzeZzKRcR9IU+PT6fr55/MVenZ3PeMb7jrPnhjxfz9fV3czO3u819KgT9H61Zs802Hx8+nC+vPp/PPria++28yz69zcxpHebbX36cb379fm62279+j39H0Bd6mG1+e7ib6/vb3YN+eb4T8YUEfaE1M4e15rjWbK9P029qm5njWnPY+Vz+lHjLQYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KafHXsDbbPvb9X+c9xQJ+kJrZo5rzWkdZmabtcPMbWZO6zDHtce0p0nQF3q1nefnu5fz7PDuPGznXYO+fvX7nO3TF1njH+4i788788npo3lvHXd9gGtmbs5389PD9dzPecfJT4OgSXHkeANrl4PGP9nsMheyQ5PiPTQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBk/InDXRZDUnSTfsAAAAASUVORK5CYII=">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   if(typeof tailwind !== 'undefined'){
@@ -880,6 +882,10 @@ function fmtDate(d){
 }
 function fmtNum(n){ return (Number(n)||0).toLocaleString(undefined, { maximumFractionDigits:2 }); }
 function fmtMVR(n){ return 'MVR ' + (Number(n)||0).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function qrCodeImgUrl(data, size){
+  size = size || 220;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(data)}`;
+}
 function byName(a,b){ return (a.name||'').localeCompare(b.name||''); }
 function byTag(a,b){
   const ta = (a.tag||'').trim(), tb = (b.tag||'').trim();
@@ -1757,8 +1763,8 @@ function locTag(locId){
 function movementRow(m, compact){
   const p = getProduct(m.productId);
   const badge = m.type==='in'
-    ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">Stock In</span>'
-    : '<span class="inline-flex px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-xs font-semibold">Stock Out</span>';
+    ? '<span class="inline-flex whitespace-nowrap px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">Stock In</span>'
+    : '<span class="inline-flex whitespace-nowrap px-2.5 py-1 rounded-full bg-rose-100 text-rose-700 text-xs font-semibold">Stock Out</span>';
   if(compact){
     return `
       <tr class="border-b border-slate-100 last:border-0">
@@ -1777,11 +1783,44 @@ function movementRow(m, compact){
       <td class="py-3">${locTag(m.locationId)}</td>
       <td class="py-3 text-right num font-medium ${m.type==='in'?'text-emerald-600':'text-rose-600'}">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
       <td class="py-3 text-slate-500">${acquisitionLabel(m)}</td>
-      <td class="py-3 text-slate-500">${esc(m.reason||'—')}</td>
       <td class="py-3 text-slate-500">${issuedToLabel(m)}</td>
       <td class="py-3 text-slate-500">${esc(m.loggedByName||'—')}</td>
-      <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">${canManageInventory() ? `<button onclick="openEditMovementForm('${m.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button><button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}</td>
+      <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+        <button onclick="openMovementDetail('${m.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Details</button>
+        ${canManageInventory() ? `<button onclick="openEditMovementForm('${m.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button><button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}
+      </td>
     </tr>`;
+}
+function openMovementDetail(id){
+  const m = state.movements.find(x=>x.id===id);
+  if(!m){ toast('That movement could not be found.', true); return; }
+  const p = getProduct(m.productId);
+  const loc = getLocation(m.locationId);
+  const isIn = m.type==='in';
+  const row = (label, value) => `
+    <div class="flex items-center justify-between gap-4 py-2.5 border-b border-slate-100 last:border-0">
+      <span class="text-xs font-semibold text-slate-500">${esc(label)}</span>
+      <span class="text-sm text-slate-800 text-right">${value}</span>
+    </div>`;
+  const body = `
+    <div class="mb-4">
+      <span class="inline-flex whitespace-nowrap px-2.5 py-1 rounded-full text-xs font-bold ${isIn?'bg-emerald-100 text-emerald-700':'bg-rose-100 text-rose-700'}">${isIn?'Stock In':'Stock Out'}</span>
+    </div>
+    <div>
+      ${row('Item', p ? esc(displayName(p)) + (p.sku?` <span class="text-slate-400">(${esc(p.sku)})</span>`:'') : '<span class="text-slate-400">Deleted item</span>')}
+      ${row('Location', loc ? locTag(loc.id) : '<span class="text-slate-400">—</span>')}
+      ${row('Quantity', `<span class="num font-semibold ${isIn?'text-emerald-600':'text-rose-600'}">${isIn?'+':'-'}${fmtNum(m.quantity)}</span>`)}
+      ${row('Date', esc(fmtDate(m.date)))}
+      ${row(isIn?'Acquisition':'Consumption from', acquisitionLabel(m))}
+      ${row('Reason / reference', m.reason ? esc(m.reason) : '<span class="text-slate-400">—</span>')}
+      ${!isIn ? row('Issued to', issuedToLabel(m)) : ''}
+      ${row('Logged by', esc(m.loggedByName||'—'))}
+    </div>
+    <div class="flex justify-end mt-5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Close</button>
+    </div>
+  `;
+  openModal('Transaction details', body);
 }
 function acquisitionLabel(m){
   if(!m.acquisition) return '—';
@@ -2331,7 +2370,7 @@ function viewMovements(){
         <table class="w-full text-sm">
           <thead><tr class="sticky-thead sticky-thead-2 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold">Location</th>
-            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Acquisition</th><th class="py-3 font-semibold">Reason / reference</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Acquisition</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
           <tbody>${list.map(m=>movementRow(m,false)).join('')}</tbody>
         </table>
@@ -3157,6 +3196,27 @@ function viewAssetDetail(){
         <div class="text-xs font-medium text-slate-500">Added</div>
         <div class="text-sm font-bold text-slate-900 mt-1">${asset.createdAt?fmtDate(asset.createdAt.slice(0,10)):'—'}</div>
       </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
+      <div class="text-sm font-bold text-slate-900 mb-1">Reference number & QR code</div>
+      <div class="text-xs text-slate-500 mb-4">Scan to quickly pull up this asset on a phone</div>
+      ${asset.tag ? `
+      <div class="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+        <img src="${qrCodeImgUrl(asset.tag)}" alt="QR code for ${esc(asset.tag)}" width="150" height="150" class="rounded-lg border border-slate-200 shrink-0">
+        <div class="text-center sm:text-left">
+          <div class="text-xs font-medium text-slate-500">Asset reference number</div>
+          <div class="text-lg font-bold text-slate-900 num mb-3">${esc(asset.tag)}</div>
+          <div class="flex flex-wrap justify-center sm:justify-start gap-2.5">
+            <a href="${qrCodeImgUrl(asset.tag, 600)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Open full size</a>
+            <a href="${qrCodeImgUrl(asset.tag, 600)}" download="${esc(asset.tag)}-qr.png" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Download</a>
+          </div>
+        </div>
+      </div>` : `
+      <div class="text-center py-8">
+        <p class="text-sm text-slate-500 mb-3">This asset has no reference number yet, so there's nothing to encode.</p>
+        ${canManageInventory() ? `<button onclick="openAssetForm('${asset.id}')" class="inline-flex px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Add a reference number</button>` : ''}
+      </div>`}
     </div>
 
     ${asset.notes ? `
