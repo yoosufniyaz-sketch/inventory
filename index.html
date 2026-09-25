@@ -1779,10 +1779,9 @@ function movementRow(m, compact){
     <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
       <td class="px-5 sm:px-6 py-3 text-slate-500">${fmtDate(m.date)}</td>
       <td class="py-3">${badge}</td>
-      <td class="py-3 text-slate-700">${p?esc(displayName(p)):'<span class="text-slate-400">Deleted item</span>'}</td>
+      <td class="py-3 text-slate-700">${p ? `<button onclick="openMovementDetail('${m.id}')" class="font-medium text-slate-700 hover:text-brand-600 hover:underline text-left">${esc(displayName(p))}</button>` : '<span class="text-slate-400">Deleted item</span>'}</td>
       <td class="py-3">${locTag(m.locationId)}</td>
       <td class="py-3 text-right num font-medium ${m.type==='in'?'text-emerald-600':'text-rose-600'}">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
-      <td class="py-3 text-slate-500">${acquisitionLabel(m)}</td>
       <td class="py-3 text-slate-500">${issuedToLabel(m)}</td>
       <td class="py-3 text-slate-500">${esc(m.loggedByName||'—')}</td>
       <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
@@ -2370,7 +2369,7 @@ function viewMovements(){
         <table class="w-full text-sm">
           <thead><tr class="sticky-thead sticky-thead-2 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold">Location</th>
-            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Acquisition</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
           <tbody>${list.map(m=>movementRow(m,false)).join('')}</tbody>
         </table>
