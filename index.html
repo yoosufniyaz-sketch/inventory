@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FDC Inventory</title>
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA0UlEQVR4nO2XMQ7CMAxFn5sWBKhCLHALdq7BHTgcG0fgBgysHAEJ1AUEjc3SIjE2lYhAsZQxzsu3LX0LYESMLObjAHnoRSef7N40KI8QuQRBChTiWM+WTLIBiqFm7C5HKr13/lEngDb5UByb+YpFUVKb4k3ZVycqvdNV1CAFDLjWNwbi3gAaWMleTegk691A0ccwASSABJAAEkACSAAJIBjAN1asPaERZMkEmOYjZvmYpynePBnyPYCHebbnA6Uboihq1jji7vGbiwn80WoWfQxfvWZQ6gKBucwAAAAASUVORK5CYII=">
+<link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjogIkZEQyBJbnZlbnRvcnkiLCAic2hvcnRfbmFtZSI6ICJGREMgSW52ZW50b3J5IiwgImRlc2NyaXB0aW9uIjogIkZEQyBzdG9jaywgYXNzZXQgYW5kIGNvc3QgbWFuYWdlbWVudCIsICJzdGFydF91cmwiOiAiLiIsICJzY29wZSI6ICIuIiwgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsICJiYWNrZ3JvdW5kX2NvbG9yIjogIiMwZjE3MmEiLCAidGhlbWVfY29sb3IiOiAiIzBmMTcyYSIsICJpY29ucyI6IFt7InNyYyI6ICJkYXRhOmltYWdlL3BuZztiYXNlNjQsaVZCT1J3MEtHZ29BQUFBTlNVaEVVZ0FBQU1BQUFBREFDQVlBQUFCUzNHd0hBQUFEREVsRVFWUjRuTzNjdllvbFJSaUE0YStQNCtncU1vS3d5YkRweGdhQzErUFZlUmxlZ1laR1ltWWdDSXVJKytQc1RKbE1zQmRRemNDK3p3UG5oQi9GNGJ4VjNUVDBNVE5ySU9yeTFBdUFweVFBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtSZFBmVUNQamJIQjkvbldGN2t0TkV4WG94Rm1CTmdvMC9tbUp2ajg3bWVxem5uRkZqemV0M05QL1BXcnJXSkFEWTQ1cGcxYTI2T1ovUEROOS9QdDEvZHpzTmEyeE5ZTS9QVHE5L214Nzkvbm5mejN2RzlnUUEyK25RdWMvdloxL1B5eStlbkJmRHJ2My9PY2VvOVJvc0FObG96ODk5NlAyL3U3K1poemduZ2J0MXZudG9tZ00yT09lWnlIRE5yLzEzQWVwelBQcDREa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBMnRWVEwrQmp0QjQvWjh4bEx3R2M2Tmc4VHdEN0NXQ3pZNDY1UFA3MWR3ZHdtYlY5WnQweE5wWnR2cGpyK2U3Wmk3bTl2cG1IazM3VzM5LytOYis4KzJQdTUrR1UrVFVDSU0wbDBHYm5YUHg4YU5teE5uSUNrT1k1QUdrQ0lFMEFwQW1BTkFHUUpnRFNCRUNhQUVnVEFHa0NJRTBBcEFtQU5BR1FKZ0RTQkVDYUFFZ1RBR2tDSUUwQXBBbUFOQUdRSmdEU0JFRGEveHZlUlp5dHVzaFlBQUFBQUVsRlRrU3VRbUNDIiwgInNpemVzIjogIjE5MngxOTIiLCAidHlwZSI6ICJpbWFnZS9wbmciLCAicHVycG9zZSI6ICJhbnkifSwgeyJzcmMiOiAiZGF0YTppbWFnZS9wbmc7YmFzZTY0LGlWQk9SdzBLR2dvQUFBQU5TVWhFVWdBQUFnQUFBQUlBQ0FZQUFBRDBlTlQ2QUFBTE5rbEVRVlI0bk8zY1RXOGIxeG1BMFhkSXlSOUozTHJJcGlpeTZyci8vLzhVTFZBVWFUNFExN1pFa1ROZHlMSmpOOTAxWXN6bkhHS0lnY1RGM0FVNXo4eTk1REl6MndBQUtidHpId0FBOFBnRUFBQUVDUUFBQ0JJQUFCQWtBQUFnU0FBQVFKQUFBSUFnQVFBQVFRSUFBSUlFQUFBRUNRQUFDQklBQUJBa0FBQWdTQUFBUUpBQUFJQWdBUUFBUVFJQUFJSUVBQUFFQ1FBQUNCSUFBQkFrQUFBZ1NBQUFRSkFBQUlBZ0FRQUFRUUlBQUlJRUFBQUVDUUFBQ0JJQUFCQWtBQUFnU0FBQVFKQUFBSUFnQVFBQVFRSUFBSUlFQUFBRUNRQUFDQklBQUJBa0FBQWdTQUFBUUpBQUFJQWdBUUFBUVFJQUFJSUVBQUFFQ1FBQUNCSUFBQkFrQUFBZ1NBQUFRSkFBQUlBZ0FRQUFRUUlBQUlJRUFBQUVDUUFBQ0JJQUFCQWtBQUFnU0FBQVFKQUFBSUFnQVFBQVFRSUFBSUlFQUFBRUNRQUFDQklBQUJBa0FBQWdTQUFBUUpBQUFJQWdBUUFBUVFJQUFJSUVBQUFFWFozN0FLQnMrZGx6MC9helorQXhMZU85QndBNTdnREFHVHhjK1MrZjdEZnVCbng4MWIvTnpEYnJSMzhEZm4wQ0FNNWdtWm5kTEhNOSs3bWEzZXhubHd5QTAyeHpuSFdPYzV6VGJMTkpBSGcwQWdET1lEZTcrV0t1NThYeWJGN3Nuczd6M2ZYc2w5MHNzMXo4S2ZCaDNuSGQxcm5aanZOcXZaMmYxcmZ6WnU1bW5kTzVEdzh5QkFDY3dmWHM1K1h1K1h4ei9ZZjU1c25MK2ZyNnkzbTZ1NzhQVUFtQXczcWFIMDl2NSsrM1A4N2Y3bjZZNCtuVjNBa0FlRFFDQUI3Qi9aWDloMVA3OWV6bTVlNkwrZlBUcitjdlgvMXB2bm4yY3I3YVA1bXJaVGZiZHYvS1M1c01lQmpUc3N5Y3RtM2Vyc2Y1eCsxUDgzeDVNbS9YdS9seGZUdXZ0OFBNZkZnWFlVb0FmajBDQU01Z044czhYYTdteGY3cGZIMzk1Znp4Nll2NTNmNVpLZ0JlcjRlNTIwN3orLzN6ZWJhN25wMmZKWUZISlFEZ0RMYVpXV2ViNDdiT1lUdk43WHFjbStVdUZRQzM2M0VPNjJudTVqU256UUpBZUd3Q0FNNWtuWFdPczg1aFBjN3RlcHpyWlI4TWdPTWN0M1hXZDE4REJCNlBBSUF6V1dhWjNTeXpYM2F6WDNaejlXNTd1QmErNUFCWVpucy83dnZ2UGx6YWFPRzN6NlFiQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQTBOVzVEd0RLdHZmYnA0L0xzMzIwLzJHY2x6aFcrQndJQURpalplNXZ3KzFtZWI4OW5CU1g4eDdhLzkzRG1KWjMrL2ZqdmJ4eHd1ZENBTUNaYmY5anV6VGJKL3VYT2s3NFhGZ0RBTDhCeGF2ZzVXY2I4UGpjQVlBeldXZWJ3M3FhbTlQZHZEa2VacGxscnBiZGJOdDIyVk1BdTVuVHVzM05lamR2VDRjNWJIZXpicWRadCsyL1hndjhlZ1FBbk1GeDFubTlIdWJiNDcvbnJ6ZmZ6YzE2TjgvMzE3TmJkaGU2QlBDRFpablp0bTBPNjkxOGUzZzkvN3g3TmEvVzJ6bk9ldTVEZ3hRQkFJL2cwNVA2WVU3ejNmcG01dkN2K2VIMFpyNjZlVHJYeS81K0VlQnkyUUh3NExpZTVzMTZtTytQYitlNzA1dTVuZU5ILzcvMEVJSnplMWlRQ3p5aVpaYTVtdDFjejM2ZXpINnVaemU3WlRlZDA5NHkyN2JPY2JZNXpHbnUzbTJWMGNOdmdRQ0FNN3RmQ0xlOG4vTittUCsrdERmbUw0MXBlL2Q4YVdPRno4RWxmczdBWnllNTRHMloyWHo2d05rSUFBQUlzZ2dRem1qNWhiMGVVd0J3RHU0QUFFQ1FYd0lFZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBa0FBQWdDQUJBQUJCQWdBQWdnUUFBQVFKQUFBSUVnQUFFQ1FBQUNCSUFBQkFrQUFBZ0NBQkFBQkJBZ0FBZ2dRQUFBUUpBQUFJRWdBQUVDUUFBQ0JJQUFCQWtBQUFnQ0FCQUFCQkFnQUFnZ1FBQUFRSkFBQUlFZ0FBRUNRQUFDQklBQUJBMEg4QXNDNU0rTWlVQzFFQUFBQUFTVVZPUks1Q1lJST0iLCAic2l6ZXMiOiAiNTEyeDUxMiIsICJ0eXBlIjogImltYWdlL3BuZyIsICJwdXJwb3NlIjogImFueSJ9LCB7InNyYyI6ICJkYXRhOmltYWdlL3BuZztiYXNlNjQsaVZCT1J3MEtHZ29BQUFBTlNVaEVVZ0FBQU1BQUFBREFDQVlBQUFCUzNHd0hBQUFEREVsRVFWUjRuTzNjdllvbFJSaUE0YStQNCtncU1vS3d5YkRweGdhQzErUFZlUmxlZ1laR1ltWWdDSXVJKytQc1RKbE1zQmRRemNDK3p3UG5oQi9GNGJ4VjNUVDBNVE5ySU9yeTFBdUFweVFBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtSZFBmVUNQamJIQjkvbldGN2t0TkV4WG94Rm1CTmdvMC9tbUp2ajg3bWVxem5uRkZqemV0M05QL1BXcnJXSkFEWTQ1cGcxYTI2T1ovUEROOS9QdDEvZHpzTmEyeE5ZTS9QVHE5L214Nzkvbm5mejN2RzlnUUEyK25RdWMvdloxL1B5eStlbkJmRHJ2My9PY2VvOVJvc0FObG96ODk5NlAyL3U3K1poemduZ2J0MXZudG9tZ00yT09lWnlIRE5yLzEzQWVwelBQcDREa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBbWdCSUV3QnBBaUJOQUtRSmdEUUJrQ1lBMGdSQW1nQklFd0JwQWlCTkFLUUpnRFFCa0NZQTBnUkFtZ0JJRXdCcEFpQk5BS1FKZ0RRQmtDWUEwZ1JBMnRWVEwrQmp0QjQvWjh4bEx3R2M2Tmc4VHdEN0NXQ3pZNDY1UFA3MWR3ZHdtYlY5WnQweE5wWnR2cGpyK2U3Wmk3bTl2cG1IazM3VzM5LytOYis4KzJQdTUrR1UrVFVDSU0wbDBHYm5YUHg4YU5teE5uSUNrT1k1QUdrQ0lFMEFwQW1BTkFHUUpnRFNCRUNhQUVnVEFHa0NJRTBBcEFtQU5BR1FKZ0RTQkVDYUFFZ1RBR2tDSUUwQXBBbUFOQUdRSmdEU0JFRGEveHZlUlp5dHVzaFlBQUFBQUVsRlRrU3VRbUNDIiwgInNpemVzIjogIjE5MngxOTIiLCAidHlwZSI6ICJpbWFnZS9wbmciLCAicHVycG9zZSI6ICJtYXNrYWJsZSJ9XX0=">
+<meta name="theme-color" content="#0f172a">
 <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAADDklEQVR4nO3cvYokVRiA4e90t38ruDBGmhmKNyJ4vcaG3oGRCGYmizKOqzM702WyiIGB9haM+87zQFX49aF4OX2ooNbMbAMRh8deAOxJ0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJOT32At5Wa2bW6/vec8+zzeZzKRcR9IU+PT6fr55/MVenZ3PeMb7jrPnhjxfz9fV3czO3u819KgT9H61Zs802Hx8+nC+vPp/PPria++28yz69zcxpHebbX36cb379fm62279+j39H0Bd6mG1+e7ib6/vb3YN+eb4T8YUEfaE1M4e15rjWbK9P029qm5njWnPY+Vz+lHjLQYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KafHXsDbbPvb9X+c9xQJ+kJrZo5rzWkdZmabtcPMbWZO6zDHtce0p0nQF3q1nefnu5fz7PDuPGznXYO+fvX7nO3TF1njH+4i788788npo3lvHXd9gGtmbs5389PD9dzPecfJT4OgSXHkeANrl4PGP9nsMheyQ5PiPTQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBk/InDXRZDUnSTfsAAAAASUVORK5CYII=">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
@@ -1030,6 +1032,25 @@ async function init(){
   if(cfg) initCloudIfConfigured();
 }
 
+let assetCodeBackfillDone = false;
+function backfillDepartmentAssetCodes(){
+  if(assetCodeBackfillDone) return;
+  if(!canManageInventory()) return; // only an admin session persists this, avoiding permission errors and duplicate work across sessions
+  const missing = state.assets.filter(a=>!a.departmentAssetCode);
+  if(!missing.length){ assetCodeBackfillDone = true; return; }
+  missing.sort((a,b)=> (a.createdAt||'').localeCompare(b.createdAt||'') || (a.name||'').localeCompare(b.name||''));
+  let next = 0;
+  state.assets.forEach(a=>{
+    const match = (a.departmentAssetCode||'').match(/^AD-(\d+)$/);
+    if(match){ const n = parseInt(match[1], 10); if(n > next) next = n; }
+  });
+  missing.forEach(a=>{
+    next += 1;
+    a.departmentAssetCode = 'AD-' + String(next).padStart(4, '0');
+    persistAssetDoc(a);
+  });
+  assetCodeBackfillDone = true;
+}
 function renderApp(){
   const cfg = getCloudConfig();
   const needsAuth = !!cfg && cloudStatus !== 'local' && cloudStatus !== 'error';
@@ -1046,6 +1067,7 @@ function renderApp(){
     appRoot.classList.remove('hidden');
     if(ui.tab==='admin' && !(authUser && authUser.role==='admin')) ui.tab = 'dashboard';
     if(ui.tab==='locations' && !canManageInventory()) ui.tab = 'dashboard';
+    backfillDepartmentAssetCodes();
     render();
   }
 }
@@ -1783,7 +1805,6 @@ function movementRow(m, compact){
       <td class="py-3">${locTag(m.locationId)}</td>
       <td class="py-3 text-right num font-medium ${m.type==='in'?'text-emerald-600':'text-rose-600'}">${m.type==='in'?'+':'-'}${fmtNum(m.quantity)}</td>
       <td class="py-3 text-slate-500">${issuedToLabel(m)}</td>
-      <td class="py-3 text-slate-500">${esc(m.loggedByName||'—')}</td>
       <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
         <button onclick="openMovementDetail('${m.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Details</button>
         ${canManageInventory() ? `<button onclick="openEditMovementForm('${m.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button><button onclick="deleteMovement('${m.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Delete</button>` : ''}
@@ -2369,7 +2390,7 @@ function viewMovements(){
         <table class="w-full text-sm">
           <thead><tr class="sticky-thead sticky-thead-2 text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold">Location</th>
-            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 font-semibold">Logged by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Issued to</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
           <tbody>${list.map(m=>movementRow(m,false)).join('')}</tbody>
         </table>
@@ -3198,23 +3219,23 @@ function viewAssetDetail(){
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
-      <div class="text-sm font-bold text-slate-900 mb-1">Reference number & QR code</div>
+      <div class="text-sm font-bold text-slate-900 mb-1">Department asset code & QR code</div>
       <div class="text-xs text-slate-500 mb-4">Scan to quickly pull up this asset on a phone</div>
-      ${asset.tag ? `
+      ${asset.departmentAssetCode ? `
       <div class="flex flex-col sm:flex-row items-center sm:items-start gap-5">
-        <img src="${qrCodeImgUrl(asset.tag)}" alt="QR code for ${esc(asset.tag)}" width="150" height="150" class="rounded-lg border border-slate-200 shrink-0">
+        <img src="${qrCodeImgUrl(asset.departmentAssetCode)}" alt="QR code for ${esc(asset.departmentAssetCode)}" width="150" height="150" class="rounded-lg border border-slate-200 shrink-0">
         <div class="text-center sm:text-left">
-          <div class="text-xs font-medium text-slate-500">Asset reference number</div>
-          <div class="text-lg font-bold text-slate-900 num mb-3">${esc(asset.tag)}</div>
+          <div class="text-xs font-medium text-slate-500">Department asset code</div>
+          <div class="text-lg font-bold text-slate-900 num mb-3">${esc(asset.departmentAssetCode)}</div>
           <div class="flex flex-wrap justify-center sm:justify-start gap-2.5">
-            <a href="${qrCodeImgUrl(asset.tag, 600)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Open full size</a>
-            <a href="${qrCodeImgUrl(asset.tag, 600)}" download="${esc(asset.tag)}-qr.png" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Download</a>
+            <a href="${qrCodeImgUrl(asset.departmentAssetCode, 600)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Open full size</a>
+            <a href="${qrCodeImgUrl(asset.departmentAssetCode, 600)}" download="${esc(asset.departmentAssetCode)}-qr.png" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Download</a>
           </div>
         </div>
       </div>` : `
       <div class="text-center py-8">
-        <p class="text-sm text-slate-500 mb-3">This asset has no reference number yet, so there's nothing to encode.</p>
-        ${canManageInventory() ? `<button onclick="openAssetForm('${asset.id}')" class="inline-flex px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Add a reference number</button>` : ''}
+        <p class="text-sm text-slate-500 mb-3">This asset has no department asset code yet, so there's nothing to encode.</p>
+        ${canManageInventory() ? `<button onclick="openAssetForm('${asset.id}')" class="inline-flex px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Add a department asset code</button>` : ''}
       </div>`}
     </div>
 
@@ -3297,9 +3318,18 @@ function removeImage(prefix){
   if(removeBtn) removeBtn.classList.add('hidden');
   if(fileInput) fileInput.value = '';
 }
+function nextDepartmentAssetCode(){
+  let max = 0;
+  state.assets.forEach(a=>{
+    const match = (a.departmentAssetCode||'').match(/^AD-(\d+)$/);
+    if(match){ const n = parseInt(match[1], 10); if(n > max) max = n; }
+  });
+  return 'AD-' + String(max+1).padStart(4, '0');
+}
 function openAssetForm(id){
   if(id && !canManageInventory()){ toast('Only admins can edit assets.', true); return; }
   const editing = id ? getAsset(id) : null;
+  const deptCodeValue = editing ? (editing.departmentAssetCode||'') : nextDepartmentAssetCode();
   const body = `
     <div id="af-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
     <div class="mb-4">
@@ -3315,6 +3345,11 @@ function openAssetForm(id){
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Serial number</label>
         <input type="text" id="af-serial" value="${editing?esc(editing.serialNumber||''):''}" placeholder="Optional" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Department asset code</label>
+      <input type="text" id="af-dept-code" value="${esc(deptCodeValue)}" placeholder="e.g. AD-0001" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <div class="text-[11px] text-slate-400 mt-1.5">${editing ? 'Used to generate this asset&#39;s QR code.' : 'Auto-generated next in the series — feel free to change it before saving.'}</div>
     </div>
     <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
@@ -3379,6 +3414,7 @@ function saveAsset(id){
     name,
     tag: document.getElementById('af-tag').value.trim(),
     serialNumber: document.getElementById('af-serial').value.trim(),
+    departmentAssetCode: document.getElementById('af-dept-code').value.trim(),
     category: document.getElementById('af-category').value.trim(),
     locationId,
     department: document.getElementById('af-department').value.trim(),
