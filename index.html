@@ -2493,8 +2493,13 @@ function populateMovementVariants(name){
   const variants = state.products.filter(p=>p.name===name).sort(byDisplayName);
   const sel = document.getElementById('mf-variant');
   if(!sel) return;
-  sel.innerHTML = variants.map(p=>`<option value="${p.id}">${esc(p.variant&&p.variant.trim()?p.variant.trim():'Standard')}${p.sku?(' — '+esc(p.sku)):''}</option>`).join('');
+  sel.innerHTML = variants.map(p=>`<option value="${p.id}">${esc(p.variant&&p.variant.trim()?p.variant.trim():'Standard')}</option>`).join('');
   document.getElementById('mf-product').value = variants.length ? variants[0].id : '';
+  const codeHint = document.getElementById('mf-item-code');
+  if(codeHint){
+    const code = variants.length ? variants[0].sku : '';
+    codeHint.textContent = code ? ('Item code: '+code) : '';
+  }
   updateMovementHint();
 }
 function selectMovementVariant(){
@@ -2530,6 +2535,7 @@ function openEditMovementForm(id){
           oninput="filterMovementItems()" onfocus="this.select(); filterMovementItems();" onblur="hideMovementItemDropdown()"
           class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
         <div id="mf-item-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+        <div id="mf-item-code" class="text-[11px] text-slate-400 mt-1">${p&&p.sku?('Item code: '+esc(p.sku)):''}</div>
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant *</label>
@@ -2667,6 +2673,7 @@ function openMovementForm(type){
           oninput="filterMovementItems()" onfocus="this.select(); filterMovementItems();" onblur="hideMovementItemDropdown()"
           class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
         <div id="mf-item-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+        <div id="mf-item-code" class="text-[11px] text-slate-400 mt-1"></div>
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant *</label>
