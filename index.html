@@ -986,9 +986,6 @@ function closeModal(){
   overlay.classList.remove('flex');
   document.getElementById('modal-body').innerHTML = '';
 }
-document.getElementById('modal-overlay').addEventListener('click', (e)=>{
-  if(e.target.id === 'modal-overlay') closeModal();
-});
 document.addEventListener('keydown', (e)=>{
   const overlay = document.getElementById('modal-overlay');
   if(overlay.classList.contains('hidden')) return;
