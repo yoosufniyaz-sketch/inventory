@@ -228,20 +228,38 @@ async function setJSON(key, value){
     markStorageUp();
     return true;
   }catch(e){
-    // Most commonly a full/disabled storage quota (e.g. private browsing)
+    // Most commonly a full/disabled storage quota (e.g. private browsing) —
+    // if this array carries embedded photos, retry once without them rather
+    // than giving up (the cloud copy, when connected, still has the images).
+    if(Array.isArray(value) && value.some(x=>x && x.image)){
+      try{
+        const lightened = value.map(x=> x && x.image ? {...x, image:''} : x);
+        window.localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(lightened));
+        markStorageUp();
+        return true;
+      }catch(e2){ /* still too large or storage genuinely unavailable — fall through */ }
+    }
     markStorageDown('error');
     return false;
   }
 }
+// Local cache copies of items/assets never need to carry embedded photos:
+// once cloud sync is on, Firestore holds the authoritative copy with images,
+// and this local copy is only a resilience fallback. Photos are by far the
+// biggest thing pushing these arrays past the browser's local storage quota,
+// so we strip them here proactively (rather than only after a write fails).
+function stripImagesForLocalCache(list){
+  return list.map(x=> x && x.image ? {...x, image:''} : x);
+}
 async function persistItemDoc(item){
-  await setJSON('products', state.products);
+  await setJSON('products', firestoreItemsRef ? stripImagesForLocalCache(state.products) : state.products);
   if(firestoreItemsRef){
     try{ await firestoreItemsRef.doc(item.id).set(item); }
     catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
   }
 }
 async function deleteItemDoc(id){
-  await setJSON('products', state.products);
+  await setJSON('products', firestoreItemsRef ? stripImagesForLocalCache(state.products) : state.products);
   if(firestoreItemsRef){
     try{ await firestoreItemsRef.doc(id).delete(); }
     catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
@@ -262,14 +280,14 @@ async function deleteMovementDoc(id){
   }
 }
 async function persistAssetDoc(asset){
-  await setJSON('assets', state.assets);
+  await setJSON('assets', firestoreAssetsRef ? stripImagesForLocalCache(state.assets) : state.assets);
   if(firestoreAssetsRef){
     try{ await firestoreAssetsRef.doc(asset.id).set(asset); }
     catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
   }
 }
 async function deleteAssetDoc(id){
-  await setJSON('assets', state.assets);
+  await setJSON('assets', firestoreAssetsRef ? stripImagesForLocalCache(state.assets) : state.assets);
   if(firestoreAssetsRef){
     try{ await firestoreAssetsRef.doc(id).delete(); }
     catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
