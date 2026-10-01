@@ -9,6 +9,7 @@
 <meta name="theme-color" content="#0f172a">
 <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAADDklEQVR4nO3cvYokVRiA4e90t38ruDBGmhmKNyJ4vcaG3oGRCGYmizKOqzM702WyiIGB9haM+87zQFX49aF4OX2ooNbMbAMRh8deAOxJ0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJOT32At5Wa2bW6/vec8+zzeZzKRcR9IU+PT6fr55/MVenZ3PeMb7jrPnhjxfz9fV3czO3u819KgT9H61Zs802Hx8+nC+vPp/PPria++28yz69zcxpHebbX36cb379fm62279+j39H0Bd6mG1+e7ib6/vb3YN+eb4T8YUEfaE1M4e15rjWbK9P029qm5njWnPY+Vz+lHjLQYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KafHXsDbbPvb9X+c9xQJ+kJrZo5rzWkdZmabtcPMbWZO6zDHtce0p0nQF3q1nefnu5fz7PDuPGznXYO+fvX7nO3TF1njH+4i788788npo3lvHXd9gGtmbs5389PD9dzPecfJT4OgSXHkeANrl4PGP9nsMheyQ5PiPTQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBk/InDXRZDUnSTfsAAAAASUVORK5CYII=">
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>
   if(typeof tailwind !== 'undefined'){
   tailwind.config = {
@@ -156,6 +157,8 @@ const DEFAULT_LOCATIONS = [
   { id:'loc-t13', name:'T-13',         code:'T13', color:'#ec4899' },
 ];
 let LOCATIONS = DEFAULT_LOCATIONS.map(l=>({...l}));
+let notificationSettings = { enabled:false, serviceId:'', templateId:'', publicKey:'', recipients:'' };
+let notifiedLowStockKeys = new Set(); // dedupe: avoid re-emailing while a product/location stays below reorder level
 function getLocation(id){ return LOCATIONS.find(l=>l.id===id); }
 
 const ui = {
@@ -363,6 +366,7 @@ let movementsUnsub = null;
 let assetsUnsub = null;
 let assetTransfersUnsub = null;
 let locationsUnsub = null;
+let notifSettingsUnsub = null;
 let profileUnsub = null;
 let allProfilesUnsub = null;
 let pendingSignupExtra = null;
@@ -461,6 +465,7 @@ async function initCloudIfConfigured(){
         listenToCloudAssets();
         listenToCloudAssetTransfers();
         listenToCloudLocations();
+        listenToCloudNotificationSettings();
         ensureOwnProfileDoc(user, pendingExtra);
         listenToOwnProfile(user);
       } else {
@@ -470,6 +475,7 @@ async function initCloudIfConfigured(){
         if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
         if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
         if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
+        if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
         if(profileUnsub){ profileUnsub(); profileUnsub = null; }
         if(allProfilesUnsub){ allProfilesUnsub(); allProfilesUnsub = null; }
         state.profiles = [];
@@ -520,7 +526,7 @@ function listenToCloudItems(){
   itemsUnsub = firestoreItemsRef.onSnapshot(snap=>{
     cloudStatus = 'synced';
     state.products = snap.docs.map(d=>d.data());
-    localStorage.setItem(STORAGE_PREFIX+'products', JSON.stringify(state.products));
+    setJSON('products', stripImagesForLocalCache(state.products));
     renderApp();
   }, err=> handleCloudSyncError(err, 'items'));
 }
@@ -528,7 +534,7 @@ function listenToCloudMovements(){
   if(movementsUnsub) movementsUnsub();
   movementsUnsub = firestoreMovementsRef.onSnapshot(snap=>{
     state.movements = snap.docs.map(d=>d.data());
-    localStorage.setItem(STORAGE_PREFIX+'movements', JSON.stringify(state.movements));
+    setJSON('movements', state.movements);
     renderApp();
   }, err=> handleCloudSyncError(err, 'stock movements'));
 }
@@ -536,7 +542,7 @@ function listenToCloudAssets(){
   if(assetsUnsub) assetsUnsub();
   assetsUnsub = firestoreAssetsRef.onSnapshot(snap=>{
     state.assets = snap.docs.map(d=>d.data());
-    localStorage.setItem(STORAGE_PREFIX+'assets', JSON.stringify(state.assets));
+    setJSON('assets', stripImagesForLocalCache(state.assets));
     renderApp();
   }, err=> handleCloudSyncError(err, 'assets'));
 }
@@ -544,7 +550,7 @@ function listenToCloudAssetTransfers(){
   if(assetTransfersUnsub) assetTransfersUnsub();
   assetTransfersUnsub = firestoreAssetTransfersRef.onSnapshot(snap=>{
     state.assetTransfers = snap.docs.map(d=>d.data());
-    localStorage.setItem(STORAGE_PREFIX+'assetTransfers', JSON.stringify(state.assetTransfers));
+    setJSON('assetTransfers', state.assetTransfers);
     renderApp();
   }, err=> handleCloudSyncError(err, 'asset transfers'));
 }
@@ -553,16 +559,65 @@ function listenToCloudLocations(){
   locationsUnsub = firestoreDb.collection('fdc_inventory_meta').doc('locations').onSnapshot(doc=>{
     if(doc.exists && Array.isArray(doc.data().list) && doc.data().list.length){
       LOCATIONS = doc.data().list;
-      localStorage.setItem(STORAGE_PREFIX+'locations', JSON.stringify(LOCATIONS));
+      setJSON('locations', LOCATIONS);
       renderApp();
     }
   }, err=> handleCloudSyncError(err, 'locations'));
 }
 async function persistLocations(){
-  localStorage.setItem(STORAGE_PREFIX+'locations', JSON.stringify(LOCATIONS));
+  await setJSON('locations', LOCATIONS);
   if(firestoreDb){
     try{ await firestoreDb.collection('fdc_inventory_meta').doc('locations').set({ list: LOCATIONS }); }
     catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+function listenToCloudNotificationSettings(){
+  if(notifSettingsUnsub) notifSettingsUnsub();
+  notifSettingsUnsub = firestoreDb.collection('fdc_inventory_meta').doc('notificationSettings').onSnapshot(doc=>{
+    if(doc.exists){
+      notificationSettings = Object.assign({ enabled:false, serviceId:'', templateId:'', publicKey:'', recipients:'' }, doc.data());
+      setJSON('notificationSettings', notificationSettings);
+      renderApp();
+    }
+  }, err=> handleCloudSyncError(err, 'notification settings'));
+}
+async function persistNotificationSettings(){
+  await setJSON('notificationSettings', notificationSettings);
+  if(firestoreDb){
+    try{ await firestoreDb.collection('fdc_inventory_meta').doc('notificationSettings').set(notificationSettings); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+function reorderLevelAtForNotify(p, locId){
+  if(p.reorderLevels && p.reorderLevels[locId]!=null && p.reorderLevels[locId]!=='') return Number(p.reorderLevels[locId]);
+  return Number(p.reorderLevel)||0;
+}
+async function checkLowStockAndNotify(product, locationId){
+  if(!notificationSettings.enabled || !notificationSettings.serviceId || !notificationSettings.templateId || !notificationSettings.publicKey || !notificationSettings.recipients) return;
+  if(typeof emailjs === 'undefined') return; // SDK failed to load (e.g. offline) — fail silently, this is a best-effort notification
+  const loc = getLocation(locationId);
+  if(!product || !loc) return;
+  const qty = qtyAt(product, locationId);
+  const threshold = reorderLevelAtForNotify(product, locationId);
+  const key = product.id + '::' + locationId;
+  const isLow = qty <= threshold;
+  if(!isLow){
+    notifiedLowStockKeys.delete(key); // back above threshold — allow a fresh notification if it dips again later
+    return;
+  }
+  if(notifiedLowStockKeys.has(key)) return; // already notified for this ongoing low-stock condition
+  notifiedLowStockKeys.add(key);
+  try{
+    await emailjs.send(notificationSettings.serviceId, notificationSettings.templateId, {
+      to_email: notificationSettings.recipients,
+      item_name: displayName(product),
+      sku: product.sku || '—',
+      location_name: loc.name,
+      current_qty: fmtNum(qty),
+      reorder_level: fmtNum(threshold),
+    }, { publicKey: notificationSettings.publicKey });
+  }catch(e){
+    notifiedLowStockKeys.delete(key); // allow a retry on the next relevant save, rather than silently giving up forever
   }
 }
 function moveLocation(id, direction){
@@ -585,6 +640,7 @@ function disconnectCloud(){
     if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
     if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
+    if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
     if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
     firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
     closeModal();
@@ -1035,18 +1091,20 @@ function confirmAction(message, onYes){
    INIT
 ===================================================================== */
 async function init(){
-  const [products, movements, assets, assetTransfers, locations] = await Promise.all([
+  const [products, movements, assets, assetTransfers, locations, savedNotifSettings] = await Promise.all([
     getJSON('products', []),
     getJSON('movements', []),
     getJSON('assets', []),
     getJSON('assetTransfers', []),
     getJSON('locations', null),
+    getJSON('notificationSettings', null),
   ]);
   state.products = products || [];
   state.movements = movements || [];
   state.assets = assets || [];
   state.assetTransfers = assetTransfers || [];
   if(Array.isArray(locations) && locations.length) LOCATIONS = locations;
+  if(savedNotifSettings && typeof savedNotifSettings==='object') notificationSettings = Object.assign(notificationSettings, savedNotifSettings);
   const cfg = getCloudConfig();
   if(cfg) cloudStatus = 'connecting'; // avoid a flash of the app before we know sign-in state
   history.replaceState({ tab: ui.tab, selectedItemId: ui.selectedItemId, selectedAssetId: ui.selectedAssetId }, '', '#'+ui.tab);
@@ -1196,6 +1254,17 @@ init();
    COMPUTED STATS
 ===================================================================== */
 function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; }
+function acquisitionBalance(productId, acquisition, excludeMovementId){
+  if(!acquisition) return Infinity; // nothing to check against if no acquisition type is chosen yet
+  let inQty = 0, outQty = 0;
+  state.movements.forEach(m=>{
+    if(m.productId!==productId || m.acquisition!==acquisition) return;
+    if(excludeMovementId && m.id===excludeMovementId) return;
+    if(m.type==='in') inQty += (Number(m.quantity)||0);
+    else if(m.type==='out') outQty += (Number(m.quantity)||0);
+  });
+  return inQty - outQty;
+}
 function productTotalQty(p){ return LOCATIONS.reduce((sum,l)=> sum + qtyAt(p, l.id), 0); }
 function reorderLevelAt(p, locId){ return (p.reorderLevels && p.reorderLevels[locId]!=null) ? p.reorderLevels[locId] : null; }
 function hasPerLocationReorder(p){ return !!(p.reorderLevels && LOCATIONS.some(l=> p.reorderLevels[l.id]!=null)); }
@@ -1778,6 +1847,7 @@ function saveProduct(id){
     state.products.push(savedProduct);
   }
   persistItemDoc(savedProduct);
+  LOCATIONS.forEach(loc=>checkLowStockAndNotify(savedProduct, loc.id));
   closeModal();
   toast(id ? 'Item updated.' : 'Item added.');
   rerenderMain();
@@ -2076,7 +2146,7 @@ function viewAdmin(){
     <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
       Nobody can set another person's password directly here — that would need a backend server. You can update someone's designation, department, and role, or send them a password reset email.
     </div>
-    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
       ${list.length ? `
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -2091,7 +2161,79 @@ function viewAdmin(){
         <p class="text-sm text-slate-500 max-w-sm mx-auto">If this doesn't update, make sure Firestore rules allow admins to read the fdc_inventory_profiles collection.</p>
       </div>`}
     </div>
+    ${viewLowStockNotificationSettings()}
   `;
+}
+function viewLowStockNotificationSettings(){
+  const s = notificationSettings;
+  return `
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6">
+      <div class="text-sm font-bold text-slate-900 mb-1">Low-stock email notifications</div>
+      <div class="text-xs text-slate-500 mb-4">Sends an email automatically the moment an item's quantity drops to or below its reorder level.</div>
+      <div class="bg-slate-50 text-slate-600 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
+        This is a browser-only app with no mail server, so sending real email needs a free third-party bridge called <a href="https://www.emailjs.com" target="_blank" rel="noopener" class="text-brand-600 underline">EmailJS</a>. One-time setup: create a free EmailJS account, connect your email (Gmail, Outlook, etc.) as an "Email Service", and create an "Email Template" whose body uses these variables: <code class="bg-white px-1 rounded">{{item_name}}</code>, <code class="bg-white px-1 rounded">{{sku}}</code>, <code class="bg-white px-1 rounded">{{location_name}}</code>, <code class="bg-white px-1 rounded">{{current_qty}}</code>, <code class="bg-white px-1 rounded">{{reorder_level}}</code>, sent <code class="bg-white px-1 rounded">to_email</code>. Then paste the three IDs EmailJS gives you below.
+      </div>
+      <label class="flex items-center gap-2.5 mb-4 cursor-pointer w-fit">
+        <input type="checkbox" id="notif-enabled" ${s.enabled?'checked':''} class="w-4 h-4 rounded border-slate-300">
+        <span class="text-sm font-medium text-slate-700">Enable low-stock email notifications</span>
+      </label>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">EmailJS Service ID</label>
+          <input type="text" id="notif-service-id" value="${esc(s.serviceId||'')}" placeholder="e.g. service_abc1234" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">EmailJS Template ID</label>
+          <input type="text" id="notif-template-id" value="${esc(s.templateId||'')}" placeholder="e.g. template_xyz789" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">EmailJS Public Key</label>
+          <input type="text" id="notif-public-key" value="${esc(s.publicKey||'')}" placeholder="e.g. AbCdEfGhIjKlMnOp" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Recipient email(s)</label>
+          <input type="text" id="notif-recipients" value="${esc(s.recipients||'')}" placeholder="e.g. stores@fdc.mv, manager@fdc.mv" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <button onclick="saveLowStockNotificationSettings()" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Save settings</button>
+        <button onclick="sendTestLowStockEmail()" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Send test email</button>
+      </div>
+    </div>
+  `;
+}
+function saveLowStockNotificationSettings(){
+  if(!canManageInventory()){ toast('Only admins can change notification settings.', true); return; }
+  notificationSettings = {
+    enabled: document.getElementById('notif-enabled').checked,
+    serviceId: document.getElementById('notif-service-id').value.trim(),
+    templateId: document.getElementById('notif-template-id').value.trim(),
+    publicKey: document.getElementById('notif-public-key').value.trim(),
+    recipients: document.getElementById('notif-recipients').value.trim(),
+  };
+  persistNotificationSettings();
+  toast('Notification settings saved.');
+}
+async function sendTestLowStockEmail(){
+  const serviceId = document.getElementById('notif-service-id').value.trim();
+  const templateId = document.getElementById('notif-template-id').value.trim();
+  const publicKey = document.getElementById('notif-public-key').value.trim();
+  const recipients = document.getElementById('notif-recipients').value.trim();
+  if(!serviceId || !templateId || !publicKey || !recipients){ toast('Fill in all four fields first.', true); return; }
+  if(typeof emailjs === 'undefined'){ toast('The EmailJS library did not load — check your internet connection.', true); return; }
+  try{
+    await emailjs.send(serviceId, templateId, {
+      to_email: recipients,
+      item_name: 'Test Item',
+      sku: 'TEST-001',
+      location_name: 'Head Office',
+      current_qty: '2',
+      reorder_level: '5',
+    }, { publicKey });
+    toast('Test email sent — check the inbox.');
+  }catch(e){
+    toast('Could not send the test email. Double-check the IDs and your EmailJS template.', true);
+  }
 }
 function viewLocations(){
   return `
@@ -2652,6 +2794,18 @@ function saveMovementEdit(id){
     }
     return;
   }
+  if(m.type==='out'){
+    const balance = acquisitionBalance(productId, acquisition, m.id);
+    if(qty > balance){
+      errEl.textContent = `Only ${fmtNum(balance)} units of this item were ever acquired via ${acquisition} — reduce the quantity or choose a different consumption source.`;
+      errEl.classList.remove('hidden');
+      if(oldProduct && oldProduct.stock){
+        const curOld = qtyAt(oldProduct, m.locationId);
+        oldProduct.stock[m.locationId] = m.type==='in' ? curOld + m.quantity : curOld - m.quantity;
+      }
+      return;
+    }
+  }
 
   if(!newProduct.stock) newProduct.stock = {};
   newProduct.stock[locationId] = m.type==='in' ? currentAtNewLoc + qty : currentAtNewLoc - qty;
@@ -2668,6 +2822,7 @@ function saveMovementEdit(id){
   if(oldProduct) persistItemDoc(oldProduct);
   if(newProduct !== oldProduct) persistItemDoc(newProduct);
   persistMovementDoc(m);
+  checkLowStockAndNotify(newProduct, locationId);
   closeModal();
   toast('Movement updated.');
   rerenderMain();
@@ -2782,6 +2937,14 @@ function saveMovement(type){
     errEl.classList.remove('hidden');
     return;
   }
+  if(type==='out'){
+    const balance = acquisitionBalance(productId, acquisition);
+    if(qty > balance){
+      errEl.textContent = `Only ${fmtNum(balance)} units of this item were ever acquired via ${acquisition} — reduce the quantity or choose a different consumption source.`;
+      errEl.classList.remove('hidden');
+      return;
+    }
+  }
 
   if(!p.stock) p.stock = {};
   p.stock[locationId] = type==='in' ? currentAtLoc + qty : currentAtLoc - qty;
@@ -2793,6 +2956,7 @@ function saveMovement(type){
   state.movements.push(newMovement);
   persistItemDoc(p);
   persistMovementDoc(newMovement);
+  checkLowStockAndNotify(p, locationId);
   closeModal();
   toast('Stock movement logged.');
   rerenderMain();
