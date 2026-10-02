@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAADDklEQVR4nO3cvYokVRiA4e90t38ruDBGmhmKNyJ4vcaG3oGRCGYmizKOqzM702WyiIGB9haM+87zQFX49aF4OX2ooNbMbAMRh8deAOxJ0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJOT32At5Wa2bW6/vec8+zzeZzKRcR9IU+PT6fr55/MVenZ3PeMb7jrPnhjxfz9fV3czO3u819KgT9H61Zs802Hx8+nC+vPp/PPria++28yz69zcxpHebbX36cb379fm62279+j39H0Bd6mG1+e7ib6/vb3YN+eb4T8YUEfaE1M4e15rjWbK9P029qm5njWnPY+Vz+lHjLQYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KafHXsDbbPvb9X+c9xQJ+kJrZo5rzWkdZmabtcPMbWZO6zDHtce0p0nQF3q1nefnu5fz7PDuPGznXYO+fvX7nO3TF1njH+4i788788npo3lvHXd9gGtmbs5389PD9dzPecfJT4OgSXHkeANrl4PGP9nsMheyQ5PiPTQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBk/InDXRZDUnSTfsAAAAASUVORK5CYII=">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
   if(typeof tailwind !== 'undefined'){
   tailwind.config = {
@@ -139,6 +140,24 @@
       <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none px-1">&times;</button>
     </div>
     <div id="modal-body" class="px-5 sm:px-6 py-5"></div>
+  </div>
+</div>
+
+<!-- QR scanner (layers on top of the modal rather than replacing it, so in-progress form data is never lost) -->
+<div id="scanner-overlay" class="fixed inset-0 bg-slate-900/80 z-[70] hidden items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+      <h3 class="text-base font-bold text-slate-900">Scan item QR code</h3>
+      <button onclick="closeItemScanner()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none px-1">&times;</button>
+    </div>
+    <div class="p-5">
+      <div class="relative bg-slate-900 rounded-lg overflow-hidden aspect-square">
+        <video id="scanner-video" class="w-full h-full object-cover" playsinline muted></video>
+        <div class="absolute inset-6 border-2 border-white/70 rounded-lg pointer-events-none"></div>
+      </div>
+      <canvas id="scanner-canvas" class="hidden"></canvas>
+      <div id="scanner-status" class="text-xs text-slate-500 mt-3 text-center">Point the camera at a printed item QR code.</div>
+    </div>
   </div>
 </div>
 
@@ -2672,6 +2691,71 @@ function selectMovementProduct(id){
   document.getElementById('mf-variant').value = id;
   updateMovementHint();
 }
+let scannerStream = null;
+let scannerRAF = null;
+async function openItemScanner(){
+  if(typeof jsQR === 'undefined'){ toast('The QR scanning library did not load — check your internet connection.', true); return; }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Camera access is not supported in this browser.', true); return; }
+  const overlay = document.getElementById('scanner-overlay');
+  const video = document.getElementById('scanner-video');
+  const status = document.getElementById('scanner-status');
+  status.textContent = 'Point the camera at a printed item QR code.';
+  status.classList.remove('text-rose-600');
+  status.classList.add('text-slate-500');
+  overlay.classList.remove('hidden');
+  overlay.classList.add('flex');
+  try{
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  }catch(e){
+    status.textContent = 'Could not access the camera — check your browser/device permissions for this site.';
+    status.classList.remove('text-slate-500');
+    status.classList.add('text-rose-600');
+    return;
+  }
+  video.srcObject = scannerStream;
+  await video.play();
+  scanItemFrame();
+}
+function closeItemScanner(){
+  if(scannerRAF){ cancelAnimationFrame(scannerRAF); scannerRAF = null; }
+  if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+  const overlay = document.getElementById('scanner-overlay');
+  overlay.classList.add('hidden');
+  overlay.classList.remove('flex');
+}
+function scanItemFrame(){
+  const video = document.getElementById('scanner-video');
+  const canvas = document.getElementById('scanner-canvas');
+  if(!scannerStream || !video.videoWidth){
+    scannerRAF = requestAnimationFrame(scanItemFrame);
+    return;
+  }
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const code = jsQR(imageData.data, imageData.width, imageData.height);
+  if(code && code.data){
+    handleScannedItemCode(code.data.trim());
+    return; // stop the scan loop; handleScannedItemCode decides whether to close or keep scanning
+  }
+  scannerRAF = requestAnimationFrame(scanItemFrame);
+}
+function handleScannedItemCode(scannedText){
+  const status = document.getElementById('scanner-status');
+  const match = state.products.find(p=> p.sku && p.sku===scannedText);
+  if(match){
+    closeItemScanner();
+    selectMovementProduct(match.id);
+    toast('Scanned: ' + displayName(match));
+  } else {
+    status.textContent = `No item found with SKU "${scannedText}" — keep scanning or search manually.`;
+    status.classList.remove('text-slate-500');
+    status.classList.add('text-rose-600');
+    scannerRAF = requestAnimationFrame(scanItemFrame);
+  }
+}
 function openEditMovementForm(id){
   if(!canManageInventory()){ toast('Only admins can edit stock movements.', true); return; }
   const m = state.movements.find(x=>x.id===id);
@@ -2832,8 +2916,9 @@ function openMovementForm(type){
   const isIn = type==='in';
   const body = `
     <div id="mf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
-    <div class="mb-4">
+    <div class="mb-4 flex items-center justify-between gap-3 flex-wrap">
       <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${isIn?'bg-emerald-100 text-emerald-700':'bg-rose-100 text-rose-700'}">${isIn?'Stock In':'Stock Out'}</span>
+      <button type="button" onclick="openItemScanner()" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">📷 Scan item QR code</button>
     </div>
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
       <div class="relative">
@@ -3334,6 +3419,27 @@ function viewItemDetail(){
           </div>`;
         }).join('')}
       </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
+      <div class="text-sm font-bold text-slate-900 mb-1">SKU & QR code</div>
+      <div class="text-xs text-slate-500 mb-4">Print this and attach it to the shelf or item — scan it from Stock In/Out to select this item instantly</div>
+      ${p.sku ? `
+      <div class="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+        <img src="${qrCodeImgUrl(p.sku)}" alt="QR code for ${esc(p.sku)}" width="150" height="150" class="rounded-lg border border-slate-200 shrink-0">
+        <div class="text-center sm:text-left">
+          <div class="text-xs font-medium text-slate-500">SKU</div>
+          <div class="text-lg font-bold text-slate-900 num mb-3">${esc(p.sku)}</div>
+          <div class="flex flex-wrap justify-center sm:justify-start gap-2.5">
+            <a href="${qrCodeImgUrl(p.sku, 600)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Open full size</a>
+            <a href="${qrCodeImgUrl(p.sku, 600)}" download="${esc(p.sku)}-qr.png" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Download</a>
+          </div>
+        </div>
+      </div>` : `
+      <div class="text-center py-8">
+        <p class="text-sm text-slate-500 mb-3">This item has no SKU yet, so there's nothing to encode.</p>
+        ${canManageInventory() ? `<button onclick="openProductForm('${p.id}')" class="inline-flex px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Add a SKU</button>` : ''}
+      </div>`}
     </div>
 
     <div class="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 mb-6">
