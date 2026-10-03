@@ -9,8 +9,6 @@
 <meta name="theme-color" content="#0f172a">
 <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAADDklEQVR4nO3cvYokVRiA4e90t38ruDBGmhmKNyJ4vcaG3oGRCGYmizKOqzM702WyiIGB9haM+87zQFX49aF4OX2ooNbMbAMRh8deAOxJ0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJOT32At5Wa2bW6/vec8+zzeZzKRcR9IU+PT6fr55/MVenZ3PeMb7jrPnhjxfz9fV3czO3u819KgT9H61Zs802Hx8+nC+vPp/PPria++28yz69zcxpHebbX36cb379fm62279+j39H0Bd6mG1+e7ib6/vb3YN+eb4T8YUEfaE1M4e15rjWbK9P029qm5njWnPY+Vz+lHjLQYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KYImRdCkCJoUQZMiaFIETYqgSRE0KafHXsDbbPvb9X+c9xQJ+kJrZo5rzWkdZmabtcPMbWZO6zDHtce0p0nQF3q1nefnu5fz7PDuPGznXYO+fvX7nO3TF1njH+4i788788npo3lvHXd9gGtmbs5389PD9dzPecfJT4OgSXHkeANrl4PGP9nsMheyQ5PiPTQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBkyJoUgRNiqBJETQpgiZF0KQImhRBk/InDXRZDUnSTfsAAAAASUVORK5CYII=">
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
   if(typeof tailwind !== 'undefined'){
   tailwind.config = {
@@ -168,7 +166,7 @@
 /* =====================================================================
    STATE
 ===================================================================== */
-const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [] };
+const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [], itemTransfers: [] };
 const DEFAULT_LOCATIONS = [
   { id:'loc-ho',  name:'Head Office',  code:'HO',  color:'#6366f1' },
   { id:'loc-apt', name:'Apollo Tower', code:'APT', color:'#10b981' },
@@ -329,6 +327,13 @@ async function deleteAssetTransferDoc(id){
     catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
   }
 }
+async function persistItemTransferDoc(t){
+  await setJSON('itemTransfers', state.itemTransfers);
+  if(firestoreItemTransfersRef){
+    try{ await firestoreItemTransfersRef.doc(t.id).set(t); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
 
 let storageDown = false;
 function markStorageDown(reason){
@@ -378,12 +383,14 @@ let firestoreItemsRef = null;
 let firestoreMovementsRef = null;
 let firestoreAssetsRef = null;
 let firestoreAssetTransfersRef = null;
+let firestoreItemTransfersRef = null;
 let firestoreProfilesRef = null;
 let firebaseAuth = null;
 let itemsUnsub = null;
 let movementsUnsub = null;
 let assetsUnsub = null;
 let assetTransfersUnsub = null;
+let itemTransfersUnsub = null;
 let locationsUnsub = null;
 let notifSettingsUnsub = null;
 let profileUnsub = null;
@@ -445,11 +452,13 @@ function clearLocalDataCache(){
   state.movements = [];
   state.assets = [];
   state.assetTransfers = [];
+  state.itemTransfers = [];
   LOCATIONS = DEFAULT_LOCATIONS.map(l=>({...l}));
   localStorage.removeItem(STORAGE_PREFIX+'products');
   localStorage.removeItem(STORAGE_PREFIX+'movements');
   localStorage.removeItem(STORAGE_PREFIX+'assets');
   localStorage.removeItem(STORAGE_PREFIX+'assetTransfers');
+  localStorage.removeItem(STORAGE_PREFIX+'itemTransfers');
   localStorage.removeItem(STORAGE_PREFIX+'locations');
 }
 
@@ -479,10 +488,12 @@ async function initCloudIfConfigured(){
         firestoreMovementsRef = firestoreDb.collection('fdc_inventory_movements');
         firestoreAssetsRef = firestoreDb.collection('fdc_inventory_assets');
         firestoreAssetTransfersRef = firestoreDb.collection('fdc_inventory_asset_transfers');
+        firestoreItemTransfersRef = firestoreDb.collection('fdc_inventory_item_transfers');
         listenToCloudItems();
         listenToCloudMovements();
         listenToCloudAssets();
         listenToCloudAssetTransfers();
+        listenToCloudItemTransfers();
         listenToCloudLocations();
         listenToCloudNotificationSettings();
         ensureOwnProfileDoc(user, pendingExtra);
@@ -493,12 +504,13 @@ async function initCloudIfConfigured(){
         if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
         if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
         if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
+        if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
         if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
         if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
         if(profileUnsub){ profileUnsub(); profileUnsub = null; }
         if(allProfilesUnsub){ allProfilesUnsub(); allProfilesUnsub = null; }
         state.profiles = [];
-        firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null;
+        firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null;
         clearLocalDataCache();
         cloudStatus = 'synced';
       }
@@ -573,6 +585,14 @@ function listenToCloudAssetTransfers(){
     renderApp();
   }, err=> handleCloudSyncError(err, 'asset transfers'));
 }
+function listenToCloudItemTransfers(){
+  if(itemTransfersUnsub) itemTransfersUnsub();
+  itemTransfersUnsub = firestoreItemTransfersRef.onSnapshot(snap=>{
+    state.itemTransfers = snap.docs.map(d=>d.data());
+    setJSON('itemTransfers', state.itemTransfers);
+    renderApp();
+  }, err=> handleCloudSyncError(err, 'item transfers'));
+}
 function listenToCloudLocations(){
   if(locationsUnsub) locationsUnsub();
   locationsUnsub = firestoreDb.collection('fdc_inventory_meta').doc('locations').onSnapshot(doc=>{
@@ -613,7 +633,10 @@ function reorderLevelAtForNotify(p, locId){
 }
 async function checkLowStockAndNotify(product, locationId){
   if(!notificationSettings.enabled || !notificationSettings.serviceId || !notificationSettings.templateId || !notificationSettings.publicKey || !notificationSettings.recipients) return;
-  if(typeof emailjs === 'undefined') return; // SDK failed to load (e.g. offline) — fail silently, this is a best-effort notification
+  if(typeof emailjs === 'undefined'){
+    try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js'); }
+    catch(e){ return; } // best-effort notification — fail silently if offline
+  }
   const loc = getLocation(locationId);
   if(!product || !loc) return;
   const qty = qtyAt(product, locationId);
@@ -658,10 +681,11 @@ function disconnectCloud(){
     if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
     if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
+    if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
     if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
     if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
     if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
     closeModal();
     toast('Cloud sync disconnected.');
     renderApp();
@@ -962,7 +986,8 @@ async function saveCloudConfig(){
     if(movementsUnsub){ movementsUnsub(); movementsUnsub = null; }
     if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firebaseAuth = null; authUser = null;
+    if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firebaseAuth = null; authUser = null;
     await initCloudIfConfigured();
   }catch(e){
     errEl.textContent = e.message; errEl.classList.remove('hidden');
@@ -974,6 +999,18 @@ async function saveCloudConfig(){
 ===================================================================== */
 function uid(){ return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,9); }
 function nowISO(){ return new Date().toISOString(); }
+const loadedScripts = {};
+function loadScriptOnce(src){
+  if(loadedScripts[src]) return loadedScripts[src];
+  loadedScripts[src] = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = ()=>resolve();
+    s.onerror = ()=>{ delete loadedScripts[src]; reject(new Error('Failed to load '+src)); };
+    document.head.appendChild(s);
+  });
+  return loadedScripts[src];
+}
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(d){
@@ -1025,6 +1062,11 @@ const ICONS = {
   locations:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 4.5 7 3l6 2 4.5-1.5v11L13 16l-6-2-4.5 1.5z"/><path d="M7 3v11M13 5v11"/></svg>',
 };
 function canManageInventory(){ return !authUser || authUser.role==='admin'; }
+function canAcceptTransferForLocation(locationId){
+  if(canManageInventory()) return true;
+  const loc = getLocation(locationId);
+  return !!(loc && loc.custodianUid && authUser && authUser.uid===loc.custodianUid);
+}
 const NAV_BASE = [
   { id:'dashboard', label:'Dashboard', icon:'dashboard' },
   { id:'products', label:'Items', icon:'products' },
@@ -1110,11 +1152,12 @@ function confirmAction(message, onYes){
    INIT
 ===================================================================== */
 async function init(){
-  const [products, movements, assets, assetTransfers, locations, savedNotifSettings] = await Promise.all([
+  const [products, movements, assets, assetTransfers, itemTransfers, locations, savedNotifSettings] = await Promise.all([
     getJSON('products', []),
     getJSON('movements', []),
     getJSON('assets', []),
     getJSON('assetTransfers', []),
+    getJSON('itemTransfers', []),
     getJSON('locations', null),
     getJSON('notificationSettings', null),
   ]);
@@ -1122,6 +1165,7 @@ async function init(){
   state.movements = movements || [];
   state.assets = assets || [];
   state.assetTransfers = assetTransfers || [];
+  state.itemTransfers = itemTransfers || [];
   if(Array.isArray(locations) && locations.length) LOCATIONS = locations;
   if(savedNotifSettings && typeof savedNotifSettings==='object') notificationSettings = Object.assign(notificationSettings, savedNotifSettings);
   const cfg = getCloudConfig();
@@ -1273,6 +1317,135 @@ init();
    COMPUTED STATS
 ===================================================================== */
 function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; }
+function openItemTransferForm(productId){
+  const p = getProduct(productId);
+  if(!p){ toast('Item not found.', true); return; }
+  const locationsWithStock = LOCATIONS.filter(l=>qtyAt(p, l.id)>0);
+  if(!locationsWithStock.length){ toast('This item has no stock anywhere to transfer.', true); return; }
+  const fromId = locationsWithStock[0].id;
+  const body = `
+    <div id="xf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="mb-4 text-sm">
+      <div class="font-semibold text-slate-800">${esc(displayName(p))}</div>
+      <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">From location *</label>
+        <select id="xf-from" onchange="updateItemTransferHint('${productId}')" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${locationsWithStock.map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">To location *</label>
+        <select id="xf-to" onchange="updateItemTransferHint('${productId}')" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${LOCATIONS.filter(l=>l.id!==fromId).map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})${l.custodianName?(' — custodian: '+esc(l.custodianName)):' — no custodian set'}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="xf-hint" class="text-[11.5px] text-slate-400 -mt-2 mb-4"></div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
+        <input type="number" min="0" step="any" id="xf-qty" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
+        <input type="date" id="xf-date" value="${todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / notes</label>
+      <input type="text" id="xf-reason" placeholder="e.g. Rebalancing stock between sites" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
+      Stock leaves the source location immediately, but won't arrive at the destination until that location's custodian accepts the transfer.
+    </div>
+    <div class="flex justify-end gap-2.5">
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveItemTransfer('${productId}')">Send transfer</button>
+    </div>
+  `;
+  openModal('Transfer item', body);
+  updateItemTransferHint(productId);
+}
+function updateItemTransferHint(productId){
+  const p = getProduct(productId);
+  const fromId = document.getElementById('xf-from').value;
+  const hint = document.getElementById('xf-hint');
+  if(p && hint) hint.textContent = `Currently in stock at source: ${fmtNum(qtyAt(p, fromId))}`;
+}
+function saveItemTransfer(productId){
+  const errEl = document.getElementById('xf-error');
+  errEl.classList.add('hidden');
+  const p = getProduct(productId);
+  if(!p){ errEl.textContent='Item not found.'; errEl.classList.remove('hidden'); return; }
+  const fromLocationId = document.getElementById('xf-from').value;
+  const toLocationId = document.getElementById('xf-to').value;
+  const qty = Number(document.getElementById('xf-qty').value);
+  const date = document.getElementById('xf-date').value;
+  const reason = document.getElementById('xf-reason').value.trim();
+  const fromLoc = getLocation(fromLocationId), toLoc = getLocation(toLocationId);
+  if(!fromLoc || !toLoc){ errEl.textContent='Choose both a source and destination location.'; errEl.classList.remove('hidden'); return; }
+  if(fromLocationId===toLocationId){ errEl.textContent='Source and destination must be different locations.'; errEl.classList.remove('hidden'); return; }
+  if(!qty || qty<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
+  const available = qtyAt(p, fromLocationId);
+  if(qty > available){ errEl.textContent = `Only ${fmtNum(available)} in stock at ${fromLoc.name}.`; errEl.classList.remove('hidden'); return; }
+  if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
+
+  if(!p.stock) p.stock = {};
+  p.stock[fromLocationId] = available - qty; // leaves the source immediately; destination only credited on acceptance
+  const transfer = {
+    id: uid(), productId, fromLocationId, toLocationId, quantity: qty, date, reason,
+    status: 'pending',
+    initiatedByName: authUser ? authUser.name : null,
+    initiatedByEmail: authUser ? authUser.email : null,
+    createdAt: nowISO(),
+  };
+  state.itemTransfers.push(transfer);
+  persistItemDoc(p);
+  persistItemTransferDoc(transfer);
+  closeModal();
+  toast(`Transfer sent — awaiting acceptance at ${toLoc.name}.`);
+  rerenderMain();
+}
+function acceptItemTransfer(transferId){
+  const t = state.itemTransfers.find(x=>x.id===transferId);
+  if(!t || t.status!=='pending') return;
+  if(!canAcceptTransferForLocation(t.toLocationId)){ toast("Only that location's custodian (or an admin) can accept this transfer.", true); return; }
+  const p = getProduct(t.productId);
+  if(!p){ toast('That item no longer exists.', true); return; }
+  if(!p.stock) p.stock = {};
+  p.stock[t.toLocationId] = qtyAt(p, t.toLocationId) + t.quantity;
+  t.status = 'accepted';
+  t.respondedByName = authUser ? authUser.name : null;
+  t.respondedByEmail = authUser ? authUser.email : null;
+  t.respondedAt = nowISO();
+  persistItemDoc(p);
+  persistItemTransferDoc(t);
+  toast('Transfer accepted — stock added to this location.');
+  rerenderMain();
+}
+function rejectItemTransfer(transferId){
+  const t = state.itemTransfers.find(x=>x.id===transferId);
+  if(!t || t.status!=='pending') return;
+  if(!canAcceptTransferForLocation(t.toLocationId)){ toast("Only that location's custodian (or an admin) can respond to this transfer.", true); return; }
+  confirmAction('Reject this transfer? The stock will be returned to the source location.', ()=>{
+    const p = getProduct(t.productId);
+    if(p){
+      if(!p.stock) p.stock = {};
+      p.stock[t.fromLocationId] = qtyAt(p, t.fromLocationId) + t.quantity;
+      persistItemDoc(p);
+    }
+    t.status = 'rejected';
+    t.respondedByName = authUser ? authUser.name : null;
+    t.respondedByEmail = authUser ? authUser.email : null;
+    t.respondedAt = nowISO();
+    persistItemTransferDoc(t);
+    toast('Transfer rejected — stock returned to the source location.');
+    rerenderMain();
+  });
+}
 function acquisitionBalance(productId, acquisition, excludeMovementId){
   if(!acquisition) return Infinity; // nothing to check against if no acquisition type is chosen yet
   let inQty = 0, outQty = 0;
@@ -2239,7 +2412,10 @@ async function sendTestLowStockEmail(){
   const publicKey = document.getElementById('notif-public-key').value.trim();
   const recipients = document.getElementById('notif-recipients').value.trim();
   if(!serviceId || !templateId || !publicKey || !recipients){ toast('Fill in all four fields first.', true); return; }
-  if(typeof emailjs === 'undefined'){ toast('The EmailJS library did not load — check your internet connection.', true); return; }
+  if(typeof emailjs === 'undefined'){
+    try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js'); }
+    catch(e){ toast('The EmailJS library did not load — check your internet connection.', true); return; }
+  }
   try{
     await emailjs.send(serviceId, templateId, {
       to_email: recipients,
@@ -2267,7 +2443,7 @@ function viewLocations(){
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-            <th class="px-5 sm:px-6 py-3 font-semibold">Location</th><th class="py-3 font-semibold">Code</th><th class="py-3 font-semibold">Address</th><th class="py-3 font-semibold">Stock valuation</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+            <th class="px-5 sm:px-6 py-3 font-semibold">Location</th><th class="py-3 font-semibold">Code</th><th class="py-3 font-semibold">Address</th><th class="py-3 font-semibold">Custodian</th><th class="py-3 font-semibold">Stock valuation</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
           <tbody>${LOCATIONS.map(l=>`
             <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
@@ -2279,6 +2455,7 @@ function viewLocations(){
               </td>
               <td class="py-3"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-medium">${esc(l.code)}</span></td>
               <td class="py-3 text-slate-500 max-w-xs">${l.address ? esc(l.address) : '<span class="text-slate-300">—</span>'}</td>
+              <td class="py-3 text-slate-600">${l.custodianName ? esc(l.custodianName) : '<span class="text-slate-300">—</span>'}</td>
               <td class="py-3">${l.stockValuation!==false ? '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">Yes</span>' : '<span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold">No</span>'}</td>
               <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
                 <button onclick="openLocationForm('${l.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>
@@ -2314,6 +2491,14 @@ function openLocationForm(id){
       <textarea id="lf-address" rows="2" placeholder="Optional — street address for this location" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.address||''):''}</textarea>
     </div>
     <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Custodian</label>
+      <select id="lf-custodian" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <option value="">No custodian assigned</option>
+        ${state.profiles.map(pr=>`<option value="${esc(pr.uid)}" data-name="${esc(pr.name||pr.email)}" ${editing&&editing.custodianUid===pr.uid?'selected':''}>${esc(pr.name||pr.email)}${pr.email?(' — '+esc(pr.email)):''}</option>`).join('')}
+      </select>
+      <div class="text-[11px] text-slate-400 mt-1.5">This person must accept any item transfer into this location before stock actually moves.</div>
+    </div>
+    <div class="mb-5">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Stock valuation</label>
       <div class="flex gap-5">
         <label class="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer">
@@ -2343,6 +2528,9 @@ function saveLocation(id){
   const color = document.getElementById('lf-color').value;
   const address = document.getElementById('lf-address').value.trim();
   const stockValuation = document.getElementById('lf-stock-valuation-no').checked ? false : true;
+  const custodianSelect = document.getElementById('lf-custodian');
+  const custodianUid = custodianSelect.value;
+  const custodianName = custodianUid ? custodianSelect.options[custodianSelect.selectedIndex].dataset.name : '';
   if(!name){ errEl.textContent='Location name is required.'; errEl.classList.remove('hidden'); return; }
   if(!code){ errEl.textContent='Short code is required.'; errEl.classList.remove('hidden'); return; }
   const dup = LOCATIONS.find(l=> l.code.toLowerCase()===code.toLowerCase() && l.id!==id);
@@ -2350,8 +2538,9 @@ function saveLocation(id){
   if(id){
     const loc = getLocation(id);
     loc.name = name; loc.code = code; loc.color = color; loc.address = address; loc.stockValuation = stockValuation;
+    loc.custodianUid = custodianUid; loc.custodianName = custodianName;
   } else {
-    LOCATIONS.push({ id: uid(), name, code, color, address, stockValuation });
+    LOCATIONS.push({ id: uid(), name, code, color, address, stockValuation, custodianUid, custodianName });
   }
   persistLocations();
   closeModal();
@@ -2453,6 +2642,9 @@ function viewMovements(){
   const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
   const acqOptions = ACQUISITION_TYPES.map(a=>`<option value="${esc(a)}" ${f.acquisition===a?'selected':''}>${esc(a)}</option>`).join('');
   const isValuation = ui.movementsView==='valuation';
+  const isTransfers = ui.movementsView==='transfers';
+  const pendingTransferCount = state.itemTransfers.filter(t=>t.status==='pending').length;
+  const transferList = isTransfers ? [...state.itemTransfers].sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)) : [];
   const valuation = isValuation ? costValuationByItem() : [];
   const valuationGrandTotal = valuation.reduce((s,v)=>s+v.totalCost,0);
   const categoryValuation = isValuation ? costValuationByCategory() : [];
@@ -2476,11 +2668,12 @@ function viewMovements(){
     </div>
 
     <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1 mb-6">
-      <button onclick="ui.movementsView='log'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${!isValuation?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Movement Log</button>
+      <button onclick="ui.movementsView='log'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${(!isValuation&&!isTransfers)?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Movement Log</button>
       <button onclick="ui.movementsView='valuation'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${isValuation?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Cost Valuation</button>
+      <button onclick="ui.movementsView='transfers'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors relative ${isTransfers?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Transfers${pendingTransferCount>0?` <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isTransfers?'bg-white text-brand-600':'bg-rose-500 text-white'} ml-1">${pendingTransferCount}</span>`:''}</button>
     </div>
 
-    ${isValuation ? `
+    ${isTransfers ? viewItemTransfersTab(transferList) : isValuation ? `
     <div class="bg-white rounded-xl border border-slate-200 border-l-4 border-l-brand-500 p-4 mb-6 max-w-xs">
       <div class="text-xs font-medium text-slate-500">Total consumption expense</div>
       <div class="text-xl font-extrabold text-slate-900 mt-0.5 num">${fmtMVR(valuationGrandTotal)}</div>
@@ -2633,6 +2826,51 @@ function viewMovements(){
     `}
   `;
 }
+function transferStatusBadge(status){
+  if(status==='pending') return '<span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Pending</span>';
+  if(status==='accepted') return '<span class="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">Accepted</span>';
+  return '<span class="inline-flex px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-xs font-semibold">Rejected</span>';
+}
+function viewItemTransfersTab(list){
+  return `
+    <div class="bg-white rounded-xl border border-slate-200">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold">From</th><th class="py-3 font-semibold">To</th>
+            <th class="py-3 font-semibold text-right">Quantity</th><th class="py-3 font-semibold">Status</th><th class="py-3 font-semibold">Initiated by</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${list.map(t=>{
+            const p = getProduct(t.productId);
+            const fromLoc = getLocation(t.fromLocationId), toLoc = getLocation(t.toLocationId);
+            const canRespond = t.status==='pending' && canAcceptTransferForLocation(t.toLocationId);
+            return `
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-5 sm:px-6 py-3 text-slate-500">${fmtDate(t.date)}</td>
+              <td class="py-3 text-slate-700">${p?esc(displayName(p)):'<span class="text-slate-400">Deleted item</span>'}</td>
+              <td class="py-3">${fromLoc?locTag(fromLoc.id):'—'}</td>
+              <td class="py-3">${toLoc?locTag(toLoc.id):'—'}</td>
+              <td class="py-3 text-right num font-medium">${fmtNum(t.quantity)}</td>
+              <td class="py-3">${transferStatusBadge(t.status)}</td>
+              <td class="py-3 text-slate-500">${esc(t.initiatedByName||'—')}</td>
+              <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+                ${canRespond ? `
+                  <button onclick="acceptItemTransfer('${t.id}')" class="text-xs font-semibold text-emerald-600 hover:underline mr-3">Accept</button>
+                  <button onclick="rejectItemTransfer('${t.id}')" class="text-xs font-semibold text-rose-600 hover:underline">Reject</button>
+                ` : (t.status==='pending' ? '<span class="text-xs text-slate-400">Awaiting custodian</span>' : '<span class="text-xs text-slate-300">—</span>')}
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No item transfers yet</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto">Start one from an item's detail page — stock leaves the source immediately and waits for the destination's custodian to accept it.</p>
+      </div>`}
+    </div>
+  `;
+}
 
 function getUniqueItemNames(){
   return [...new Set(state.products.map(p=>p.name))].sort((a,b)=>a.localeCompare(b));
@@ -2694,8 +2932,11 @@ function selectMovementProduct(id){
 let scannerStream = null;
 let scannerRAF = null;
 async function openItemScanner(){
-  if(typeof jsQR === 'undefined'){ toast('The QR scanning library did not load — check your internet connection.', true); return; }
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ toast('Camera access is not supported in this browser.', true); return; }
+  if(typeof jsQR === 'undefined'){
+    try{ await loadScriptOnce('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'); }
+    catch(e){ toast('The QR scanning library did not load — check your internet connection.', true); return; }
+  }
   const overlay = document.getElementById('scanner-overlay');
   const video = document.getElementById('scanner-video');
   const status = document.getElementById('scanner-status');
@@ -3374,6 +3615,7 @@ function viewItemDetail(){
       <div class="flex gap-2.5">
         <button onclick="openMovementForm('in'); setTimeout(()=>selectMovementProduct('${p.id}'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
         <button onclick="openMovementForm('out'); setTimeout(()=>selectMovementProduct('${p.id}'),0);" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
+        <button onclick="openItemTransferForm('${p.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Transfer</button>
         ${canManageInventory() ? `<button onclick="openProductForm('${p.id}')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Edit</button>` : ''}
       </div>
     </div>
