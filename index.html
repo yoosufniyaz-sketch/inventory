@@ -631,6 +631,15 @@ function reorderLevelAtForNotify(p, locId){
   if(p.reorderLevels && p.reorderLevels[locId]!=null && p.reorderLevels[locId]!=='') return Number(p.reorderLevels[locId]);
   return Number(p.reorderLevel)||0;
 }
+function recipientsForLocation(loc){
+  const emails = new Set();
+  (notificationSettings.recipients||'').split(',').map(e=>e.trim()).filter(Boolean).forEach(e=>emails.add(e));
+  if(loc && loc.custodianUid){
+    const custodianProfile = state.profiles.find(pr=>pr.uid===loc.custodianUid);
+    if(custodianProfile && custodianProfile.email) emails.add(custodianProfile.email);
+  }
+  return [...emails].join(', ');
+}
 async function checkLowStockAndNotify(product, locationId){
   if(!notificationSettings.enabled || !notificationSettings.serviceId || !notificationSettings.templateId || !notificationSettings.publicKey || !notificationSettings.recipients) return;
   if(typeof emailjs === 'undefined'){
@@ -651,7 +660,7 @@ async function checkLowStockAndNotify(product, locationId){
   notifiedLowStockKeys.add(key);
   try{
     await emailjs.send(notificationSettings.serviceId, notificationSettings.templateId, {
-      to_email: notificationSettings.recipients,
+      to_email: recipientsForLocation(loc),
       item_name: displayName(product),
       sku: product.sku || '—',
       location_name: loc.name,
@@ -1318,93 +1327,112 @@ init();
 ===================================================================== */
 function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; }
 function openItemTransferForm(productId){
-  const p = getProduct(productId);
-  if(!p){ toast('Item not found.', true); return; }
-  const locationsWithStock = LOCATIONS.filter(l=>qtyAt(p, l.id)>0);
-  if(!locationsWithStock.length){ toast('This item has no stock anywhere to transfer.', true); return; }
-  const fromId = locationsWithStock[0].id;
+  if(state.products.length===0){ toast('Add at least one item before transferring stock.', true); return; }
+  movementLineCount = 1;
+  const preselect = productId ? getProduct(productId) : null;
+  const fromId = LOCATIONS[0].id;
   const body = `
     <div id="xf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
-    <div class="mb-4 text-sm">
-      <div class="font-semibold text-slate-800">${esc(displayName(p))}</div>
-      <div class="text-[11.5px] text-slate-400">${esc(p.sku||'No SKU')}</div>
-    </div>
     <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">From location *</label>
-        <select id="xf-from" onchange="updateItemTransferHint('${productId}')" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
-          ${locationsWithStock.map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+        <select id="xf-from" onchange="refreshTransferToOptions(); updateAllMovementHints();" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${LOCATIONS.map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})</option>`).join('')}
         </select>
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">To location *</label>
-        <select id="xf-to" onchange="updateItemTransferHint('${productId}')" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <select id="xf-to" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
           ${LOCATIONS.filter(l=>l.id!==fromId).map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})${l.custodianName?(' — custodian: '+esc(l.custodianName)):' — no custodian set'}</option>`).join('')}
         </select>
       </div>
     </div>
-    <div id="xf-hint" class="text-[11.5px] text-slate-400 -mt-2 mb-4"></div>
+    <div id="mf-lines">${movementLineHtml(0)}</div>
+    <button type="button" onclick="addMovementLine()" class="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:underline mb-5">+ Add another item</button>
     <div class="grid grid-cols-2 gap-4 mb-4">
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
-        <input type="number" min="0" step="any" id="xf-qty" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-      </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
         <input type="date" id="xf-date" value="${todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
-    </div>
-    <div class="mb-5">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / notes</label>
-      <input type="text" id="xf-reason" placeholder="e.g. Rebalancing stock between sites" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / notes</label>
+        <input type="text" id="xf-reason" placeholder="e.g. Rebalancing stock between sites" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
     </div>
     <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
       Stock leaves the source location immediately, but won't arrive at the destination until that location's custodian accepts the transfer.
     </div>
     <div class="flex justify-end gap-2.5">
       <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
-      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveItemTransfer('${productId}')">Send transfer</button>
+      <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveItemTransfer()">Send transfer</button>
     </div>
   `;
-  openModal('Transfer item', body);
-  updateItemTransferHint(productId);
+  openModal('Transfer item' + (preselect ? '' : 's'), body, true);
+  if(preselect) selectMovementProduct(preselect.id, 0);
+  updateAllMovementHints();
 }
-function updateItemTransferHint(productId){
-  const p = getProduct(productId);
+function refreshTransferToOptions(){
   const fromId = document.getElementById('xf-from').value;
-  const hint = document.getElementById('xf-hint');
-  if(p && hint) hint.textContent = `Currently in stock at source: ${fmtNum(qtyAt(p, fromId))}`;
+  const toSel = document.getElementById('xf-to');
+  const prevTo = toSel.value;
+  toSel.innerHTML = LOCATIONS.filter(l=>l.id!==fromId).map(l=>`<option value="${l.id}" ${l.id===prevTo?'selected':''}>${esc(l.name)} (${esc(l.code)})${l.custodianName?(' — custodian: '+esc(l.custodianName)):' — no custodian set'}</option>`).join('');
 }
-function saveItemTransfer(productId){
+function saveItemTransfer(){
   const errEl = document.getElementById('xf-error');
   errEl.classList.add('hidden');
-  const p = getProduct(productId);
-  if(!p){ errEl.textContent='Item not found.'; errEl.classList.remove('hidden'); return; }
   const fromLocationId = document.getElementById('xf-from').value;
   const toLocationId = document.getElementById('xf-to').value;
-  const qty = Number(document.getElementById('xf-qty').value);
   const date = document.getElementById('xf-date').value;
   const reason = document.getElementById('xf-reason').value.trim();
   const fromLoc = getLocation(fromLocationId), toLoc = getLocation(toLocationId);
   if(!fromLoc || !toLoc){ errEl.textContent='Choose both a source and destination location.'; errEl.classList.remove('hidden'); return; }
   if(fromLocationId===toLocationId){ errEl.textContent='Source and destination must be different locations.'; errEl.classList.remove('hidden'); return; }
-  if(!qty || qty<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
-  const available = qtyAt(p, fromLocationId);
-  if(qty > available){ errEl.textContent = `Only ${fmtNum(available)} in stock at ${fromLoc.name}.`; errEl.classList.remove('hidden'); return; }
   if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
 
-  if(!p.stock) p.stock = {};
-  p.stock[fromLocationId] = available - qty; // leaves the source immediately; destination only credited on acceptance
-  const transfer = {
-    id: uid(), productId, fromLocationId, toLocationId, quantity: qty, date, reason,
-    status: 'pending',
-    initiatedByName: authUser ? authUser.name : null,
-    initiatedByEmail: authUser ? authUser.email : null,
-    createdAt: nowISO(),
-  };
-  state.itemTransfers.push(transfer);
-  persistItemDoc(p);
-  persistItemTransferDoc(transfer);
+  const lineEls = [...document.querySelectorAll('.mf-line-wrap')];
+  const lines = [];
+  for(const lineEl of lineEls){
+    const idx = lineEl.dataset.line;
+    const productId = document.getElementById('mf-product-'+idx).value;
+    const qty = Number(document.getElementById('mf-qty-'+idx).value);
+    const p = getProduct(productId);
+    if(!p){ errEl.textContent='Choose an item for every row.'; errEl.classList.remove('hidden'); return; }
+    if(!qty || qty<=0){ errEl.textContent = `Enter a quantity greater than zero for ${displayName(p)}.`; errEl.classList.remove('hidden'); return; }
+    lines.push({ p, qty });
+  }
+  if(!lines.length){ errEl.textContent='Add at least one item.'; errEl.classList.remove('hidden'); return; }
+
+  const totalsByProduct = {};
+  lines.forEach(({p, qty})=>{ totalsByProduct[p.id] = (totalsByProduct[p.id]||0) + qty; });
+  for(const pid of Object.keys(totalsByProduct)){
+    const p = getProduct(pid);
+    const available = qtyAt(p, fromLocationId);
+    if(totalsByProduct[pid] > available){
+      errEl.textContent = `Only ${fmtNum(available)} of ${displayName(p)} in stock at ${fromLoc.name}.`;
+      errEl.classList.remove('hidden');
+      return;
+    }
+  }
+
+  const touchedProducts = new Map();
+  const createdTransfers = [];
+  lines.forEach(({p, qty})=>{
+    const available = qtyAt(p, fromLocationId);
+    if(!p.stock) p.stock = {};
+    p.stock[fromLocationId] = available - qty; // leaves the source immediately; destination only credited on acceptance
+    const transfer = {
+      id: uid(), productId: p.id, fromLocationId, toLocationId, quantity: qty, date, reason,
+      status: 'pending',
+      initiatedByName: authUser ? authUser.name : null,
+      initiatedByEmail: authUser ? authUser.email : null,
+      createdAt: nowISO(),
+    };
+    state.itemTransfers.push(transfer);
+    createdTransfers.push(transfer);
+    touchedProducts.set(p.id, p);
+  });
+  touchedProducts.forEach(p=>persistItemDoc(p));
+  createdTransfers.forEach(t=>persistItemTransferDoc(t));
   closeModal();
   toast(`Transfer sent — awaiting acceptance at ${toLoc.name}.`);
   rerenderMain();
@@ -2363,7 +2391,7 @@ function viewLowStockNotificationSettings(){
       <div class="text-sm font-bold text-slate-900 mb-1">Low-stock email notifications</div>
       <div class="text-xs text-slate-500 mb-4">Sends an email automatically the moment an item's quantity drops to or below its reorder level.</div>
       <div class="bg-slate-50 text-slate-600 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
-        This is a browser-only app with no mail server, so sending real email needs a free third-party bridge called <a href="https://www.emailjs.com" target="_blank" rel="noopener" class="text-brand-600 underline">EmailJS</a>. One-time setup: create a free EmailJS account, connect your email (Gmail, Outlook, etc.) as an "Email Service", and create an "Email Template" whose body uses these variables: <code class="bg-white px-1 rounded">{{item_name}}</code>, <code class="bg-white px-1 rounded">{{sku}}</code>, <code class="bg-white px-1 rounded">{{location_name}}</code>, <code class="bg-white px-1 rounded">{{current_qty}}</code>, <code class="bg-white px-1 rounded">{{reorder_level}}</code>, sent <code class="bg-white px-1 rounded">to_email</code>. Then paste the three IDs EmailJS gives you below.
+        This is a browser-only app with no mail server, so sending real email needs a free third-party bridge called <a href="https://www.emailjs.com" target="_blank" rel="noopener" class="text-brand-600 underline">EmailJS</a>. One-time setup: create a free EmailJS account, connect your email (Gmail, Outlook, etc.) as an "Email Service", and create an "Email Template" whose body uses these variables: <code class="bg-white px-1 rounded">{{item_name}}</code>, <code class="bg-white px-1 rounded">{{sku}}</code>, <code class="bg-white px-1 rounded">{{location_name}}</code>, <code class="bg-white px-1 rounded">{{current_qty}}</code>, <code class="bg-white px-1 rounded">{{reorder_level}}</code>, sent <code class="bg-white px-1 rounded">to_email</code>. Then paste the three IDs EmailJS gives you below. Whenever a location has a custodian assigned (set on the <a href="#locations" class="text-brand-600 underline">Locations</a> page), that person's email is automatically added alongside the recipients below for alerts about their location.
       </div>
       <label class="flex items-center gap-2.5 mb-4 cursor-pointer w-fit">
         <input type="checkbox" id="notif-enabled" ${s.enabled?'checked':''} class="w-4 h-4 rounded border-slate-300">
@@ -2664,6 +2692,7 @@ function viewMovements(){
         ${!isValuation ? `<button onclick="exportMovementsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export report (CSV)</button>` : ''}
         <button onclick="openMovementForm('in')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
         <button onclick="openMovementForm('out')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
+        <button onclick="openItemTransferForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Stock Transfer</button>
       </div>
     </div>
 
@@ -2875,59 +2904,61 @@ function viewItemTransfersTab(list){
 function getUniqueItemNames(){
   return [...new Set(state.products.map(p=>p.name))].sort((a,b)=>a.localeCompare(b));
 }
-function movementItemOptionsHtml(filterText){
+function movementItemOptionsHtml(filterText, idx){
   const f = (filterText||'').trim().toLowerCase();
   const names = getUniqueItemNames().filter(n=> !f || n.toLowerCase().includes(f));
   if(!names.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No items match "${esc(filterText)}".</div>`;
   return names.map(n=>{
     const count = state.products.filter(p=>p.name===n).length;
     return `
-    <button type="button" data-name="${esc(n)}" onmousedown="event.preventDefault(); selectMovementItemName(this.dataset.name)" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+    <button type="button" data-name="${esc(n)}" onmousedown="event.preventDefault(); selectMovementItemName(this.dataset.name, ${idx})" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
       <span class="truncate">${esc(n)}</span>
       ${count>1 ? `<span class="text-[11px] text-slate-400 shrink-0 ml-2">${count} variants</span>` : ''}
     </button>`;
   }).join('');
 }
-function filterMovementItems(){
-  const input = document.getElementById('mf-item-search');
-  const dropdown = document.getElementById('mf-item-dropdown');
+function filterMovementItems(idx){
+  const input = document.getElementById('mf-item-search-'+idx);
+  const dropdown = document.getElementById('mf-item-dropdown-'+idx);
   if(!input || !dropdown) return;
-  dropdown.innerHTML = movementItemOptionsHtml(input.value);
+  dropdown.innerHTML = movementItemOptionsHtml(input.value, idx);
   dropdown.classList.remove('hidden');
 }
-function hideMovementItemDropdown(){
-  setTimeout(()=>{ const d = document.getElementById('mf-item-dropdown'); if(d) d.classList.add('hidden'); }, 150);
+function hideMovementItemDropdown(idx){
+  setTimeout(()=>{ const d = document.getElementById('mf-item-dropdown-'+idx); if(d) d.classList.add('hidden'); }, 150);
 }
-function selectMovementItemName(name){
-  document.getElementById('mf-item-search').value = name;
-  document.getElementById('mf-item-dropdown').classList.add('hidden');
-  populateMovementVariants(name);
+function selectMovementItemName(name, idx){
+  document.getElementById('mf-item-search-'+idx).value = name;
+  document.getElementById('mf-item-dropdown-'+idx).classList.add('hidden');
+  populateMovementVariants(name, idx);
 }
-function populateMovementVariants(name){
+function populateMovementVariants(name, idx){
   const variants = state.products.filter(p=>p.name===name).sort(byDisplayName);
-  const sel = document.getElementById('mf-variant');
+  const sel = document.getElementById('mf-variant-'+idx);
   if(!sel) return;
   sel.innerHTML = variants.map(p=>`<option value="${p.id}">${esc(p.variant&&p.variant.trim()?p.variant.trim():'Standard')}</option>`).join('');
-  document.getElementById('mf-product').value = variants.length ? variants[0].id : '';
-  const codeHint = document.getElementById('mf-item-code');
+  document.getElementById('mf-product-'+idx).value = variants.length ? variants[0].id : '';
+  const codeHint = document.getElementById('mf-item-code-'+idx);
   if(codeHint){
     const code = variants.length ? variants[0].sku : '';
     codeHint.textContent = code ? ('Item code: '+code) : '';
   }
-  updateMovementHint();
+  updateMovementHint(idx);
 }
-function selectMovementVariant(){
-  document.getElementById('mf-product').value = document.getElementById('mf-variant').value;
-  updateMovementHint();
+function selectMovementVariant(idx){
+  document.getElementById('mf-product-'+idx).value = document.getElementById('mf-variant-'+idx).value;
+  updateMovementHint(idx);
 }
-function selectMovementProduct(id){
+function selectMovementProduct(id, idx){
+  idx = (idx===undefined || idx===null) ? 0 : idx;
   const p = getProduct(id);
   if(!p) return;
-  document.getElementById('mf-product').value = id;
-  document.getElementById('mf-item-search').value = p.name;
-  populateMovementVariants(p.name);
-  document.getElementById('mf-variant').value = id;
-  updateMovementHint();
+  if(!document.getElementById('mf-product-'+idx)) return; // form isn't the multi-line movement form (e.g. edit form)
+  document.getElementById('mf-product-'+idx).value = id;
+  document.getElementById('mf-item-search-'+idx).value = p.name;
+  populateMovementVariants(p.name, idx);
+  document.getElementById('mf-variant-'+idx).value = id;
+  updateMovementHint(idx);
 }
 let scannerStream = null;
 let scannerRAF = null;
@@ -2988,7 +3019,12 @@ function handleScannedItemCode(scannedText){
   const match = state.products.find(p=> p.sku && p.sku===scannedText);
   if(match){
     closeItemScanner();
-    selectMovementProduct(match.id);
+    const lineWraps = [...document.querySelectorAll('.mf-line-wrap')];
+    const lastWrap = lineWraps[lineWraps.length-1];
+    const lastIdx = lastWrap ? lastWrap.dataset.line : 0;
+    const lastHasProduct = lastWrap && document.getElementById('mf-product-'+lastIdx) && document.getElementById('mf-product-'+lastIdx).value;
+    const targetIdx = lastHasProduct ? addMovementLine() : lastIdx;
+    selectMovementProduct(match.id, targetIdx);
     toast('Scanned: ' + displayName(match));
   } else {
     status.textContent = `No item found with SKU "${scannedText}" — keep scanning or search manually.`;
@@ -3012,30 +3048,30 @@ function openEditMovementForm(id){
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
       <div class="relative">
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
-        <input type="text" id="mf-item-search" autocomplete="off" placeholder="Search items…"
+        <input type="text" id="mf-item-search-0" autocomplete="off" placeholder="Search items…"
           value="${p?esc(p.name):''}"
-          oninput="filterMovementItems()" onfocus="this.select(); filterMovementItems();" onblur="hideMovementItemDropdown()"
+          oninput="filterMovementItems(0)" onfocus="this.select(); filterMovementItems(0);" onblur="hideMovementItemDropdown(0)"
           class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-        <div id="mf-item-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
-        <div id="mf-item-code" class="text-[11px] text-slate-400 mt-1">${p&&p.sku?('Item code: '+esc(p.sku)):''}</div>
+        <div id="mf-item-dropdown-0" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+        <div id="mf-item-code-0" class="text-[11px] text-slate-400 mt-1">${p&&p.sku?('Item code: '+esc(p.sku)):''}</div>
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant *</label>
-        <select id="mf-variant" onchange="selectMovementVariant()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white"></select>
-        <input type="hidden" id="mf-product" value="${m.productId}">
+        <select id="mf-variant-0" onchange="selectMovementVariant(0)" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white"></select>
+        <input type="hidden" id="mf-product-0" value="${m.productId}">
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
-        <select id="mf-location" onchange="updateMovementHint()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        <select id="mf-location" onchange="updateMovementHint(0)" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
           ${LOCATIONS.map(l=>`<option value="${l.id}" ${l.id===m.locationId?'selected':''}>${esc(l.name)} (${esc(l.code)})</option>`).join('')}
         </select>
       </div>
     </div>
-    <div id="mf-hint" class="text-[11.5px] text-slate-400 -mt-2 mb-4"></div>
+    <div id="mf-hint-0" class="text-[11.5px] text-slate-400 -mt-2 mb-4"></div>
     <div class="grid grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
-        <input type="number" min="0" step="any" id="mf-qty" value="${m.quantity}" oninput="updateMovementHint()" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <input type="number" min="0" step="any" id="mf-qty-0" value="${m.quantity}" oninput="updateMovementHint(0)" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
@@ -3083,9 +3119,9 @@ function saveMovementEdit(id){
   if(!m){ toast('That movement could not be found.', true); return; }
   const errEl = document.getElementById('mf-error');
   errEl.classList.add('hidden');
-  const productId = document.getElementById('mf-product').value;
+  const productId = document.getElementById('mf-product-0').value;
   const locationId = document.getElementById('mf-location').value;
-  const qty = Number(document.getElementById('mf-qty').value);
+  const qty = Number(document.getElementById('mf-qty-0').value);
   const date = document.getElementById('mf-date').value;
   const reason = document.getElementById('mf-reason').value.trim();
   const acquisition = document.getElementById('mf-acquisition').value;
@@ -3152,8 +3188,50 @@ function saveMovementEdit(id){
   toast('Movement updated.');
   rerenderMain();
 }
+let movementLineCount = 1;
+function movementLineHtml(idx){
+  return `
+    <div class="mf-line-wrap" data-line="${idx}">
+      <div class="grid grid-cols-1 sm:grid-cols-[1fr_1fr_110px_28px] gap-3 mb-1 items-end">
+        <div class="relative">
+          ${idx===0 ? '<label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>' : ''}
+          <input type="text" id="mf-item-search-${idx}" autocomplete="off" placeholder="Search items…"
+            oninput="filterMovementItems(${idx})" onfocus="this.select(); filterMovementItems(${idx});" onblur="hideMovementItemDropdown(${idx})"
+            class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+          <div id="mf-item-dropdown-${idx}" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+        </div>
+        <div>
+          ${idx===0 ? '<label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant *</label>' : ''}
+          <select id="mf-variant-${idx}" onchange="selectMovementVariant(${idx})" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+            <option value="">Choose an item first…</option>
+          </select>
+          <input type="hidden" id="mf-product-${idx}" value="">
+        </div>
+        <div>
+          ${idx===0 ? '<label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>' : ''}
+          <input type="number" min="0" step="any" id="mf-qty-${idx}" oninput="updateMovementHint(${idx})" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <button type="button" onclick="removeMovementLine(${idx})" class="h-[42px] text-slate-400 hover:text-rose-600 ${idx===0?'invisible':''}" title="Remove this item">✕</button>
+      </div>
+      <div id="mf-item-code-${idx}" class="text-[11px] text-slate-400 mb-1"></div>
+      <div id="mf-hint-${idx}" class="text-[11.5px] text-slate-400 mb-3"></div>
+    </div>
+  `;
+}
+function addMovementLine(){
+  const idx = movementLineCount;
+  movementLineCount++;
+  const wrap = document.getElementById('mf-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', movementLineHtml(idx));
+  return idx;
+}
+function removeMovementLine(idx){
+  const el = document.querySelector(`.mf-line-wrap[data-line="${idx}"]`);
+  if(el) el.remove();
+}
 function openMovementForm(type){
   if(state.products.length===0){ toast('Add at least one item before logging stock movements.', true); return; }
+  movementLineCount = 1;
   const isIn = type==='in';
   const body = `
     <div id="mf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
@@ -3161,49 +3239,28 @@ function openMovementForm(type){
       <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${isIn?'bg-emerald-100 text-emerald-700':'bg-rose-100 text-rose-700'}">${isIn?'Stock In':'Stock Out'}</span>
       <button type="button" onclick="openItemScanner()" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">📷 Scan item QR code</button>
     </div>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-      <div class="relative">
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
-        <input type="text" id="mf-item-search" autocomplete="off" placeholder="Search items…"
-          value=""
-          oninput="filterMovementItems()" onfocus="this.select(); filterMovementItems();" onblur="hideMovementItemDropdown()"
-          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-        <div id="mf-item-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
-        <div id="mf-item-code" class="text-[11px] text-slate-400 mt-1"></div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant *</label>
-        <select id="mf-variant" onchange="selectMovementVariant()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
-          <option value="">Choose an item first…</option>
-        </select>
-        <input type="hidden" id="mf-product" value="">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
-        <select id="mf-location" onchange="updateMovementHint()" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
-          ${LOCATIONS.map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})</option>`).join('')}
-        </select>
-      </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
+      <select id="mf-location" onchange="updateAllMovementHints()" class="w-full sm:w-1/2 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        ${LOCATIONS.map(l=>`<option value="${l.id}">${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+      </select>
     </div>
-    <div id="mf-hint" class="text-[11.5px] text-slate-400 -mt-2 mb-4"></div>
+    <div id="mf-lines">${movementLineHtml(0)}</div>
+    <button type="button" onclick="addMovementLine()" class="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:underline mb-5">+ Add another item</button>
     <div class="grid grid-cols-2 gap-4 mb-4">
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
-        <input type="number" min="0" step="any" id="mf-qty" oninput="updateMovementHint()" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-      </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Date *</label>
         <input type="date" id="mf-date" value="${todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
-    </div>
-    <div class="mb-5">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">${isIn?'Acquisition':'Consumption from'} *</label>
-      <select id="mf-acquisition" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
-        <option value="">Select…</option>
-        <option value="Purchase Order">Purchase Order</option>
-        <option value="CSR">CSR</option>
-        <option value="Petty Cash">Petty Cash</option>
-      </select>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">${isIn?'Acquisition':'Consumption from'} *</label>
+        <select id="mf-acquisition" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="">Select…</option>
+          <option value="Purchase Order">Purchase Order</option>
+          <option value="CSR">CSR</option>
+          <option value="Petty Cash">Petty Cash</option>
+        </select>
+      </div>
     </div>
     <div class="mb-5">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reason / reference</label>
@@ -3230,61 +3287,94 @@ function openMovementForm(type){
   `;
   openModal(isIn?'Log Stock In':'Log Stock Out', body, true);
 }
-function updateMovementHint(){
-  const hint = document.getElementById('mf-hint');
-  const pid = document.getElementById('mf-product').value;
-  const locId = document.getElementById('mf-location').value;
+function currentMovementLocationId(){
+  const movementLocEl = document.getElementById('mf-location');
+  if(movementLocEl) return movementLocEl.value;
+  const transferFromEl = document.getElementById('xf-from');
+  return transferFromEl ? transferFromEl.value : '';
+}
+function updateMovementHint(idx){
+  const hint = document.getElementById('mf-hint-'+idx);
+  const pid = document.getElementById('mf-product-'+idx).value;
+  const locId = currentMovementLocationId();
   const p = getProduct(pid);
   const loc = getLocation(locId);
   if(hint && p && loc) hint.textContent = 'Currently in stock at ' + loc.name + ': ' + fmtNum(qtyAt(p, locId)) + (p.sku ? ' · ' + p.sku : '');
 }
+function updateAllMovementHints(){
+  document.querySelectorAll('.mf-line-wrap').forEach(el=>updateMovementHint(el.dataset.line));
+}
 function saveMovement(type){
   const errEl = document.getElementById('mf-error');
   errEl.classList.add('hidden');
-  const productId = document.getElementById('mf-product').value;
   const locationId = document.getElementById('mf-location').value;
-  const qty = Number(document.getElementById('mf-qty').value);
   const date = document.getElementById('mf-date').value;
   const reason = document.getElementById('mf-reason').value.trim();
   const acquisition = document.getElementById('mf-acquisition').value;
   const department = type==='out' ? document.getElementById('mf-department').value.trim() : '';
   const staffName = type==='out' ? document.getElementById('mf-staffname').value.trim() : '';
-  const p = getProduct(productId);
   const loc = getLocation(locationId);
 
-  if(!p) { errEl.textContent='Choose an item.'; errEl.classList.remove('hidden'); return; }
   if(!loc) { errEl.textContent='Choose a location.'; errEl.classList.remove('hidden'); return; }
-  if(!qty || qty<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
   if(!date){ errEl.textContent='Choose a date.'; errEl.classList.remove('hidden'); return; }
   if(!acquisition){ errEl.textContent = type==='in' ? 'Choose how this stock was acquired.' : 'Choose what this consumption should be attributed to.'; errEl.classList.remove('hidden'); return; }
-  const currentAtLoc = qtyAt(p, locationId);
-  if(type==='out' && qty > currentAtLoc){
-    errEl.textContent = `Only ${fmtNum(currentAtLoc)} in stock at ${loc.name} — reduce the quantity or log a Stock In first.`;
-    errEl.classList.remove('hidden');
-    return;
+
+  const lineEls = [...document.querySelectorAll('.mf-line-wrap')];
+  const lines = [];
+  for(const lineEl of lineEls){
+    const idx = lineEl.dataset.line;
+    const productId = document.getElementById('mf-product-'+idx).value;
+    const qty = Number(document.getElementById('mf-qty-'+idx).value);
+    const p = getProduct(productId);
+    if(!p){ errEl.textContent='Choose an item for every row.'; errEl.classList.remove('hidden'); return; }
+    if(!qty || qty<=0){ errEl.textContent = `Enter a quantity greater than zero for ${displayName(p)}.`; errEl.classList.remove('hidden'); return; }
+    lines.push({ p, qty });
   }
-  if(type==='out'){
-    const balance = acquisitionBalance(productId, acquisition);
-    if(qty > balance){
-      errEl.textContent = `Only ${fmtNum(balance)} units of this item were ever acquired via ${acquisition} — reduce the quantity or choose a different consumption source.`;
+  if(!lines.length){ errEl.textContent='Add at least one item.'; errEl.classList.remove('hidden'); return; }
+
+  // Combine quantities per product first, so validation checks the TOTAL requested against each item's real limits
+  const totalsByProduct = {};
+  lines.forEach(({p, qty})=>{ totalsByProduct[p.id] = (totalsByProduct[p.id]||0) + qty; });
+  for(const pid of Object.keys(totalsByProduct)){
+    const p = getProduct(pid);
+    const totalQty = totalsByProduct[pid];
+    const currentAtLoc = qtyAt(p, locationId);
+    if(type==='out' && totalQty > currentAtLoc){
+      errEl.textContent = `Only ${fmtNum(currentAtLoc)} of ${displayName(p)} in stock at ${loc.name} — reduce the quantity or log a Stock In first.`;
       errEl.classList.remove('hidden');
       return;
     }
+    if(type==='out'){
+      const balance = acquisitionBalance(pid, acquisition);
+      if(totalQty > balance){
+        errEl.textContent = `Only ${fmtNum(balance)} units of ${displayName(p)} were ever acquired via ${acquisition} — reduce the quantity or choose a different consumption source.`;
+        errEl.classList.remove('hidden');
+        return;
+      }
+    }
   }
 
-  if(!p.stock) p.stock = {};
-  p.stock[locationId] = type==='in' ? currentAtLoc + qty : currentAtLoc - qty;
-  const newMovement = {
-    id: uid(), type, productId, locationId, quantity: qty, date, reason, acquisition, department, staffName, createdAt: nowISO(),
-    loggedByName: authUser ? authUser.name : null,
-    loggedByEmail: authUser ? authUser.email : null,
-  };
-  state.movements.push(newMovement);
-  persistItemDoc(p);
-  persistMovementDoc(newMovement);
-  checkLowStockAndNotify(p, locationId);
+  const touchedProducts = new Map();
+  const createdMovements = [];
+  lines.forEach(({p, qty})=>{
+    const currentAtLoc = qtyAt(p, locationId);
+    if(!p.stock) p.stock = {};
+    p.stock[locationId] = type==='in' ? currentAtLoc + qty : currentAtLoc - qty;
+    const newMovement = {
+      id: uid(), type, productId: p.id, locationId, quantity: qty, date, reason, acquisition, department, staffName, createdAt: nowISO(),
+      loggedByName: authUser ? authUser.name : null,
+      loggedByEmail: authUser ? authUser.email : null,
+    };
+    state.movements.push(newMovement);
+    createdMovements.push(newMovement);
+    touchedProducts.set(p.id, p);
+  });
+
+  touchedProducts.forEach(p=>persistItemDoc(p));
+  createdMovements.forEach(m=>persistMovementDoc(m));
+  touchedProducts.forEach(p=>checkLowStockAndNotify(p, locationId));
   closeModal();
-  toast('Stock movement logged.');
+  toast(lines.length>1 ? `${lines.length} stock movements logged.` : 'Stock movement logged.');
   rerenderMain();
 }
 function deleteMovement(id){
