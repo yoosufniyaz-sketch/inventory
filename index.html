@@ -2614,8 +2614,16 @@ function removeMember(uid, name){
   if(authUser.uid===uid){ toast('You cannot remove your own account.', true); return; }
   if(!firestoreProfilesRef || !firestoreDb){ toast('Removing members requires cloud sync to be connected.', true); return; }
   confirmAction(`Remove ${name}? They will lose access immediately. Their old sign-in will keep failing until an admin removes them from the blocked list, since this app has no backend to delete the underlying account.`, async ()=>{
+    const isPermissionError = e => e && (e.code==='permission-denied' || (e.message||'').toLowerCase().includes('permission'));
     try{
       await firestoreProfilesRef.doc(uid).delete();
+    }catch(e){
+      toast(isPermissionError(e)
+        ? 'Firestore rules are blocking profile deletion — an admin must be allowed to delete other users\u2019 documents in fdc_inventory_profiles, not just their own.'
+        : 'Could not delete that member\u2019s profile: ' + (e && e.message ? e.message : 'unknown error'), true);
+      return;
+    }
+    try{
       const metaRef = firestoreDb.collection('fdc_inventory_meta').doc('blockedUsers');
       await firestoreDb.runTransaction(async (tx)=>{
         const snap = await tx.get(metaRef);
@@ -2623,12 +2631,17 @@ function removeMember(uid, name){
         if(!uids.includes(uid)) uids.push(uid);
         tx.set(metaRef, { uids });
       });
-      state.profiles = state.profiles.filter(p=>p.uid!==uid);
-      toast('Member removed.');
-      rerenderMain();
     }catch(e){
-      toast('Could not remove this member right now.', true);
+      toast(isPermissionError(e)
+        ? 'Profile deleted, but Firestore rules are blocking the blocked-users list update — check that fdc_inventory_meta allows writes to the blockedUsers document.'
+        : 'Profile deleted, but could not update the blocked-users list: ' + (e && e.message ? e.message : 'unknown error'), true);
+      state.profiles = state.profiles.filter(p=>p.uid!==uid);
+      rerenderMain();
+      return;
     }
+    state.profiles = state.profiles.filter(p=>p.uid!==uid);
+    toast('Member removed.');
+    rerenderMain();
   });
 }
 function openEditUserModal(uid){
