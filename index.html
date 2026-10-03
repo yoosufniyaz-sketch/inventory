@@ -646,13 +646,11 @@ function reorderLevelAtForNotify(p, locId){
   return Number(p.reorderLevel)||0;
 }
 function recipientsForLocation(loc){
-  const emails = new Set();
-  (notificationSettings.recipients||'').split(',').map(e=>e.trim()).filter(Boolean).forEach(e=>emails.add(e));
   if(loc && loc.custodianUid){
     const custodianProfile = state.profiles.find(pr=>pr.uid===loc.custodianUid);
-    if(custodianProfile && custodianProfile.email) emails.add(custodianProfile.email);
+    if(custodianProfile && custodianProfile.email) return custodianProfile.email;
   }
-  return [...emails].join(', ');
+  return notificationSettings.recipients || '';
 }
 async function checkLowStockAndNotify(product, locationId){
   if(!notificationSettings.enabled || !notificationSettings.serviceId || !notificationSettings.templateId || !notificationSettings.publicKey || !notificationSettings.recipients) return;
@@ -2408,7 +2406,7 @@ function viewLowStockNotificationSettings(){
       <div class="text-sm font-bold text-slate-900 mb-1">Low-stock email notifications</div>
       <div class="text-xs text-slate-500 mb-4">Sends an email automatically the moment an item's quantity drops to or below its reorder level.</div>
       <div class="bg-slate-50 text-slate-600 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
-        This is a browser-only app with no mail server, so sending real email needs a free third-party bridge called <a href="https://www.emailjs.com" target="_blank" rel="noopener" class="text-brand-600 underline">EmailJS</a>. One-time setup: create a free EmailJS account, connect your email (Gmail, Outlook, etc.) as an "Email Service", and create an "Email Template" whose body uses these variables: <code class="bg-white px-1 rounded">{{item_name}}</code>, <code class="bg-white px-1 rounded">{{sku}}</code>, <code class="bg-white px-1 rounded">{{location_name}}</code>, <code class="bg-white px-1 rounded">{{current_qty}}</code>, <code class="bg-white px-1 rounded">{{reorder_level}}</code>, sent <code class="bg-white px-1 rounded">to_email</code>. Then paste the three IDs EmailJS gives you below. Whenever a location has a custodian assigned (set on the <a href="#locations" class="text-brand-600 underline">Locations</a> page), that person's email is automatically added alongside the recipients below for alerts about their location.
+        This is a browser-only app with no mail server, so sending real email needs a free third-party bridge called <a href="https://www.emailjs.com" target="_blank" rel="noopener" class="text-brand-600 underline">EmailJS</a>. One-time setup: create a free EmailJS account, connect your email (Gmail, Outlook, etc.) as an "Email Service", and create an "Email Template" whose body uses these variables: <code class="bg-white px-1 rounded">{{item_name}}</code>, <code class="bg-white px-1 rounded">{{sku}}</code>, <code class="bg-white px-1 rounded">{{location_name}}</code>, <code class="bg-white px-1 rounded">{{current_qty}}</code>, <code class="bg-white px-1 rounded">{{reorder_level}}</code>, sent <code class="bg-white px-1 rounded">to_email</code>. Then paste the three IDs EmailJS gives you below. For a location with a custodian assigned (set on the <a href="#locations" class="text-brand-600 underline">Locations</a> page), low-stock alerts for that location go to the custodian only — the recipients below are the fallback for locations that don't have one.
       </div>
       <label class="flex items-center gap-2.5 mb-4 cursor-pointer w-fit">
         <input type="checkbox" id="notif-enabled" ${s.enabled?'checked':''} class="w-4 h-4 rounded border-slate-300">
