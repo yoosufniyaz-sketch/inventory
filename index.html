@@ -46,6 +46,40 @@
   .pr-sticky-head{ position: sticky; top: -1.5rem; z-index: 20; }
   @media (max-width: 639px), (max-height: 599px){ .pr-sticky-head{ position: static; } }
 
+  /* Purchase requisitions: one long banner per requisition.
+     Layout follows the width of the list itself (container query), not the screen:
+     wide = a single row, medium = three short rows, narrow = a simple stack. */
+  .pr-list{ container-type: inline-size; display: flex; flex-direction: column; gap: .75rem; }
+  .pr-banner{ position: relative; overflow: hidden; cursor: pointer; min-height: 5.25rem;
+              display: grid; grid-template-columns: minmax(0,1fr) auto; column-gap: 1rem; row-gap: .25rem; align-items: center;
+              padding: .875rem 6rem .875rem 1rem; }
+  .pr-banner > div{ min-width: 0; }
+  .pr-banner .pb-num   { grid-column: 1;     grid-row: 1; }
+  .pr-banner .pb-total { grid-column: 2;     grid-row: 1; text-align: right; }
+  .pr-banner .pb-items { grid-column: 1 / 3; grid-row: 2; }
+  .pr-banner .pb-who   { grid-column: 1;     grid-row: 3; }
+  .pr-banner .pb-where { grid-column: 2;     grid-row: 3; text-align: right; }
+  .pb-trunc{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pb-nowrap{ white-space: nowrap; }
+  .pr-ribbon{ position: absolute; top: 24px; right: -42px; width: 160px; text-align: center; transform: rotate(45deg);
+              padding: 4px 0; font-size: 10px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase;
+              box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  @container (min-width: 1020px){
+    .pr-banner{ grid-template-columns: 10.5rem minmax(0,1.5fr) minmax(0,1fr) 9rem 10.5rem; column-gap: 1.25rem; }
+    .pr-banner .pb-num   { grid-column: 1; grid-row: 1; }
+    .pr-banner .pb-items { grid-column: 2; grid-row: 1; }
+    .pr-banner .pb-who   { grid-column: 3; grid-row: 1; }
+    .pr-banner .pb-where { grid-column: 4; grid-row: 1; text-align: left; }
+    .pr-banner .pb-total { grid-column: 5; grid-row: 1; }
+  }
+  @container (max-width: 540px){
+    .pr-banner{ grid-template-columns: minmax(0,1fr); padding-right: 4.5rem; }
+    .pr-banner .pb-num, .pr-banner .pb-total, .pr-banner .pb-items, .pr-banner .pb-who, .pr-banner .pb-where{ grid-column: 1; text-align: left; }
+    .pr-banner .pb-num{ grid-row: 1; } .pr-banner .pb-total{ grid-row: 2; } .pr-banner .pb-items{ grid-row: 3; }
+    .pr-banner .pb-who{ grid-row: 4; } .pr-banner .pb-where{ grid-row: 5; }
+    .pr-ribbon{ top: 16px; right: -38px; width: 130px; font-size: 9px; }
+  }
+
   /* ---------- Dark mode ---------- */
   html[data-theme="dark"]{ color-scheme: dark; }
   html[data-theme="dark"] body.bg-slate-100{ background-color: #0f172a; }
@@ -3884,7 +3918,7 @@ function clearAssetTxFilters(){
 }
 const PR_STATUSES = [
   { id:'open', label:'Open', badge:'bg-blue-100 text-blue-700', col:'bg-blue-50/50 border-blue-200', head:'text-blue-700', ribbon:'bg-blue-600', ribbonText:'text-white' },
-  { id:'pending_approval', label:'Pending Approval', badge:'bg-amber-100 text-amber-700', col:'bg-amber-50/50 border-amber-200', head:'text-amber-700', ribbon:'bg-amber-500', ribbonText:'text-[#451a03]' },
+  { id:'pending_approval', label:'Pending Approval', badge:'bg-amber-100 text-amber-700', col:'bg-amber-50/50 border-amber-200', head:'text-amber-700', ribbon:'bg-amber-500', ribbonText:'text-[#451a03]', ribbonLabel:'Pending' },
   { id:'released', label:'Released', badge:'bg-emerald-100 text-emerald-700', col:'bg-emerald-50/50 border-emerald-200', head:'text-emerald-700', ribbon:'bg-emerald-700', ribbonText:'text-white' },
   { id:'closed', label:'Closed', badge:'bg-slate-200 text-slate-600', col:'bg-slate-50 border-slate-200', head:'text-slate-600', ribbon:'bg-slate-500', ribbonText:'text-white' },
 ];
@@ -4376,7 +4410,7 @@ function deletePurchaseRequisition(id){
     rerenderMain();
   });
 }
-function prDocLinksHtml(pr){
+function prDocLinksHtml(pr, topMargin){
   const links = [
     pr.prUrl ? { label:'PR', url:pr.prUrl } : null,
     pr.poUrl ? { label:'PO', url:pr.poUrl } : null,
@@ -4384,34 +4418,44 @@ function prDocLinksHtml(pr){
     pr.invoiceUrl ? { label:'Invoice', url:pr.invoiceUrl } : null,
   ].filter(Boolean);
   if(!links.length) return '';
-  return `<div class="flex flex-wrap gap-1.5 mt-2">${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200">${esc(l.label)} ↗</a>`).join('')}</div>`;
+  return `<div class="flex flex-wrap gap-1.5 ${topMargin||'mt-2'}">${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200">${esc(l.label)} ↗</a>`).join('')}</div>`;
 }
-function prCardBudgetCodeSummary(pr){
+function prBudgetCodeText(pr){
   const codes = [...new Set((pr.lineItems||[]).map(l=>prLineBudgetCode(pr, l)).filter(Boolean))];
   if(!codes.length) return '';
-  if(codes.length===1) return ' · ' + esc(codes[0]);
-  return ' · ' + codes.length + ' budget codes';
+  return codes.length===1 ? codes[0] : codes.length + ' budget codes';
 }
+function prCardBudgetCodeSummary(pr){
+  const t = prBudgetCodeText(pr);
+  return t ? ' · ' + esc(t) : '';
+}
+// each requisition is one long banner
 function prCardHtml(pr){
   const items = pr.lineItems || [];
   const loc = getLocation(pr.locationId);
-  const firstItemName = items.length ? items[0].itemName : '';
-  const extraCount = items.length - 1;
+  const names = items.map(l=>l.itemName).filter(Boolean).join(', ');
+  const budget = prBudgetCodeText(pr);
   const s = prStatusMeta(pr.status);
   return `
-    <div onclick="openPurchaseRequisitionForm('${pr.id}')" class="relative bg-white rounded-lg border border-slate-200 p-3.5 pr-16 cursor-pointer hover:border-brand-400 hover:shadow-sm transition-colors overflow-hidden">
-      <div class="absolute top-[13px] right-[-34px] w-[140px] text-center text-[10px] font-bold uppercase tracking-wide py-1 rotate-45 ${s.ribbon} ${s.ribbonText} shadow-sm">${esc(s.label)}</div>
-      <div class="text-xs font-bold text-slate-800 num whitespace-nowrap mb-1.5">${esc(pr.prNumber)}</div>
-      <div class="flex items-start justify-between gap-2 mb-1">
-        <div class="text-sm font-medium text-slate-800 truncate" title="${esc(firstItemName)}">${esc(firstItemName)}${extraCount>0?` <span class="text-slate-400 font-normal">+${extraCount} more</span>`:''}</div>
-        <span class="text-xs font-semibold text-slate-700 num shrink-0">${fmtMVR(pr.totalCost)}</span>
+    <div onclick="openPurchaseRequisitionForm('${pr.id}')" class="pr-banner bg-white rounded-lg border border-slate-200 hover:border-brand-400 hover:shadow-sm transition-colors">
+      <div class="pr-ribbon ${s.ribbon} ${s.ribbonText}" title="${esc(s.label)}">${esc(s.ribbonLabel || s.label)}</div>
+      <div class="pb-num">
+        <div class="pb-nowrap text-sm font-bold text-slate-800 num">${esc(pr.prNumber)}</div>
+        <div class="text-[11.5px] text-slate-400">${fmtDate(prRequisitionDate(pr))}</div>
       </div>
-      <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${prCardBudgetCodeSummary(pr)}</div>
-      <div class="flex items-center justify-between gap-2 text-[11.5px] text-slate-400">
-        <span class="truncate">${loc?esc(loc.name):'—'} · ${items.length} item${items.length===1?'':'s'}</span>
-        <span class="shrink-0 whitespace-nowrap">${fmtDate(prRequisitionDate(pr))}</span>
+      <div class="pb-items">
+        <div class="pb-trunc text-sm font-medium text-slate-800" title="${esc(names)}">${names ? esc(names) : '—'}</div>
+        ${prDocLinksHtml(pr, 'mt-1')}
       </div>
-      ${prDocLinksHtml(pr)}
+      <div class="pb-who">
+        <div class="pb-trunc text-[12.5px] text-slate-600" title="${esc(pr.requester)}">${esc(pr.requester)}</div>
+        <div class="pb-trunc text-[11.5px] text-slate-400" title="${esc(budget)}">${budget ? esc(budget) : '—'}</div>
+      </div>
+      <div class="pb-where">
+        <div class="pb-trunc text-[12.5px] text-slate-600" title="${loc?esc(loc.name):''}">${loc?esc(loc.name):'—'}</div>
+        <div class="text-[11.5px] text-slate-400">${items.length} item${items.length===1?'':'s'}</div>
+      </div>
+      <div class="pb-total pb-nowrap text-[15px] font-extrabold text-slate-900 num">${fmtMVR(pr.totalCost)}</div>
     </div>
   `;
 }
@@ -4436,7 +4480,6 @@ function exportPurchaseRequisitionsCSV(){
 }
 function viewPurchaseRequisitions(){
   const all = [...state.purchaseRequisitions].sort(prSortCompare(currentPrSort()));
-  const totalValue = all.reduce((s,pr)=>s+(pr.totalCost||0), 0);
   const list = ui.prStatusFilter ? all.filter(pr=>pr.status===ui.prStatusFilter) : all;
   return `
     <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
@@ -4448,10 +4491,6 @@ function viewPurchaseRequisitions(){
         <button onclick="exportPurchaseRequisitionsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
         <button onclick="openPurchaseRequisitionForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ New Purchase Requisition</button>
       </div>
-    </div>
-    <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6 inline-block">
-      <div class="text-xs font-medium text-slate-500">Total value across ${all.length} requisition${all.length===1?'':'s'}</div>
-      <div class="text-lg font-extrabold text-slate-900 num">${fmtMVR(totalValue)}</div>
     </div>
     <div class="flex flex-wrap items-center gap-2 mb-6">
       <button onclick="ui.prStatusFilter=''; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!ui.prStatusFilter?'bg-brand-600 border-brand-600 text-white':'border-slate-300 text-slate-600 hover:bg-slate-50'}">All <span class="opacity-75">${all.length}</span></button>
@@ -4467,8 +4506,8 @@ function viewPurchaseRequisitions(){
       </label>
     </div>
     ${prBudgetBreakdownHtml(list)}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      ${list.length ? list.map(prCardHtml).join('') : `<div class="col-span-full text-center py-16 text-sm text-slate-400">${ui.prStatusFilter ? 'No requisitions with this status.' : 'No purchase requisitions yet — create one to get started.'}</div>`}
+    <div class="pr-list">
+      ${list.length ? list.map(prCardHtml).join('') : `<div class="text-center py-16 text-sm text-slate-400">${ui.prStatusFilter ? 'No requisitions with this status.' : 'No purchase requisitions yet — create one to get started.'}</div>`}
     </div>
   `;
 }
