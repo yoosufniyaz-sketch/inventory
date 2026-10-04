@@ -166,7 +166,7 @@
 /* =====================================================================
    STATE
 ===================================================================== */
-const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [], itemTransfers: [] };
+const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [], itemTransfers: [], purchaseRequisitions: [] };
 const DEFAULT_LOCATIONS = [
   { id:'loc-ho',  name:'Head Office',  code:'HO',  color:'#6366f1' },
   { id:'loc-apt', name:'Apollo Tower', code:'APT', color:'#10b981' },
@@ -334,6 +334,20 @@ async function persistItemTransferDoc(t){
     catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
   }
 }
+async function persistPurchaseRequisitionDoc(pr){
+  await setJSON('purchaseRequisitions', state.purchaseRequisitions);
+  if(firestorePurchaseRequisitionsRef){
+    try{ await firestorePurchaseRequisitionsRef.doc(pr.id).set(pr); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function deletePurchaseRequisitionDoc(id){
+  await setJSON('purchaseRequisitions', state.purchaseRequisitions);
+  if(firestorePurchaseRequisitionsRef){
+    try{ await firestorePurchaseRequisitionsRef.doc(id).delete(); }
+    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+  }
+}
 
 let storageDown = false;
 function markStorageDown(reason){
@@ -384,6 +398,7 @@ let firestoreMovementsRef = null;
 let firestoreAssetsRef = null;
 let firestoreAssetTransfersRef = null;
 let firestoreItemTransfersRef = null;
+let firestorePurchaseRequisitionsRef = null;
 let firestoreProfilesRef = null;
 let firebaseAuth = null;
 let itemsUnsub = null;
@@ -391,6 +406,7 @@ let movementsUnsub = null;
 let assetsUnsub = null;
 let assetTransfersUnsub = null;
 let itemTransfersUnsub = null;
+let purchaseRequisitionsUnsub = null;
 let locationsUnsub = null;
 let notifSettingsUnsub = null;
 let profileUnsub = null;
@@ -453,12 +469,14 @@ function clearLocalDataCache(){
   state.assets = [];
   state.assetTransfers = [];
   state.itemTransfers = [];
+  state.purchaseRequisitions = [];
   LOCATIONS = DEFAULT_LOCATIONS.map(l=>({...l}));
   localStorage.removeItem(STORAGE_PREFIX+'products');
   localStorage.removeItem(STORAGE_PREFIX+'movements');
   localStorage.removeItem(STORAGE_PREFIX+'assets');
   localStorage.removeItem(STORAGE_PREFIX+'assetTransfers');
   localStorage.removeItem(STORAGE_PREFIX+'itemTransfers');
+  localStorage.removeItem(STORAGE_PREFIX+'purchaseRequisitions');
   localStorage.removeItem(STORAGE_PREFIX+'locations');
 }
 
@@ -495,11 +513,13 @@ async function initCloudIfConfigured(){
         firestoreAssetsRef = firestoreDb.collection('fdc_inventory_assets');
         firestoreAssetTransfersRef = firestoreDb.collection('fdc_inventory_asset_transfers');
         firestoreItemTransfersRef = firestoreDb.collection('fdc_inventory_item_transfers');
+        firestorePurchaseRequisitionsRef = firestoreDb.collection('fdc_inventory_purchase_requisitions');
         listenToCloudItems();
         listenToCloudMovements();
         listenToCloudAssets();
         listenToCloudAssetTransfers();
         listenToCloudItemTransfers();
+        listenToCloudPurchaseRequisitions();
         listenToCloudLocations();
         listenToCloudNotificationSettings();
         ensureOwnProfileDoc(user, pendingExtra);
@@ -511,12 +531,13 @@ async function initCloudIfConfigured(){
         if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
         if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
         if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
+        if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
         if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
         if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
         if(profileUnsub){ profileUnsub(); profileUnsub = null; }
         if(allProfilesUnsub){ allProfilesUnsub(); allProfilesUnsub = null; }
         state.profiles = [];
-        firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null;
+        firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null;
         clearLocalDataCache();
         cloudStatus = 'synced';
       }
@@ -606,6 +627,14 @@ function listenToCloudItemTransfers(){
     setJSON('itemTransfers', state.itemTransfers);
     renderApp();
   }, err=> handleCloudSyncError(err, 'item transfers'));
+}
+function listenToCloudPurchaseRequisitions(){
+  if(purchaseRequisitionsUnsub) purchaseRequisitionsUnsub();
+  purchaseRequisitionsUnsub = firestorePurchaseRequisitionsRef.onSnapshot(snap=>{
+    state.purchaseRequisitions = snap.docs.map(d=>d.data());
+    setJSON('purchaseRequisitions', state.purchaseRequisitions);
+    renderApp();
+  }, err=> handleCloudSyncError(err, 'purchase requisitions'));
 }
 function listenToCloudLocations(){
   if(locationsUnsub) locationsUnsub();
@@ -703,10 +732,11 @@ function disconnectCloud(){
     if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
     if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
+    if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
     if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
     if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
     if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
     closeModal();
     toast('Cloud sync disconnected.');
     renderApp();
@@ -1008,7 +1038,8 @@ async function saveCloudConfig(){
     if(assetsUnsub){ assetsUnsub(); assetsUnsub = null; }
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
     if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firebaseAuth = null; authUser = null;
+    if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firebaseAuth = null; authUser = null;
     await initCloudIfConfigured();
   }catch(e){
     errEl.textContent = e.message; errEl.classList.remove('hidden');
@@ -1081,6 +1112,7 @@ const ICONS = {
   assettx:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3 3 6l3 3"/><path d="M3 6h11a3 3 0 0 1 3 3v1"/><path d="M14 17l3-3-3-3"/><path d="M17 14H6a3 3 0 0 1-3-3v-1"/></svg>',
   admin:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2.5 16.5 5v5c0 4-2.8 6.5-6.5 7.5-3.7-1-6.5-3.5-6.5-7.5V5z"/><path d="m7.2 10 1.8 1.8 3.8-3.8"/></svg>',
   locations:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 4.5 7 3l6 2 4.5-1.5v11L13 16l-6-2-4.5 1.5z"/><path d="M7 3v11M13 5v11"/></svg>',
+  pr:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5.5 2.5h7l3 3v12h-10z"/><path d="M12.5 2.5v3h3"/><path d="M7 10.5h6M7 13h6M7 8h3"/></svg>',
 };
 function canManageInventory(){ return !authUser || authUser.role==='admin'; }
 function canAcceptTransferForLocation(locationId){
@@ -1095,6 +1127,7 @@ const NAV_BASE = [
   { id:'movements', label:'Stock Movements', icon:'movements' },
   { id:'assets', label:'Assets', icon:'assets' },
   { id:'asset-transactions', label:'Asset Movements', icon:'assettx' },
+  { id:'purchase-requisitions', label:'Purchase Requisitions', icon:'pr' },
 ];
 function currentNav(){
   const nav = [...NAV_BASE];
@@ -1173,12 +1206,13 @@ function confirmAction(message, onYes){
    INIT
 ===================================================================== */
 async function init(){
-  const [products, movements, assets, assetTransfers, itemTransfers, locations, savedNotifSettings] = await Promise.all([
+  const [products, movements, assets, assetTransfers, itemTransfers, purchaseRequisitions, locations, savedNotifSettings] = await Promise.all([
     getJSON('products', []),
     getJSON('movements', []),
     getJSON('assets', []),
     getJSON('assetTransfers', []),
     getJSON('itemTransfers', []),
+    getJSON('purchaseRequisitions', []),
     getJSON('locations', null),
     getJSON('notificationSettings', null),
   ]);
@@ -1187,6 +1221,7 @@ async function init(){
   state.assets = assets || [];
   state.assetTransfers = assetTransfers || [];
   state.itemTransfers = itemTransfers || [];
+  state.purchaseRequisitions = purchaseRequisitions || [];
   if(Array.isArray(locations) && locations.length) LOCATIONS = locations;
   if(savedNotifSettings && typeof savedNotifSettings==='object') notificationSettings = Object.assign(notificationSettings, savedNotifSettings);
   const cfg = getCloudConfig();
@@ -1266,6 +1301,7 @@ function render(){
     else if(ui.tab==='assets') el.innerHTML = viewAssets();
     else if(ui.tab==='asset-detail') el.innerHTML = viewAssetDetail();
     else if(ui.tab==='asset-transactions') el.innerHTML = viewAssetTransactions();
+    else if(ui.tab==='purchase-requisitions') el.innerHTML = viewPurchaseRequisitions();
     else if(ui.tab==='locations') el.innerHTML = viewLocations();
     else if(ui.tab==='admin') el.innerHTML = viewAdmin();
   }catch(e){
@@ -3623,6 +3659,208 @@ function hasActiveAssetTxFilters(){
 function clearAssetTxFilters(){
   ui.assetTransactionsFilter = { search:'', locationId:'', dateFrom:'', dateTo:'' };
   rerenderMain();
+}
+const PR_STATUSES = [
+  { id:'open', label:'Open', badge:'bg-blue-100 text-blue-700', col:'bg-blue-50/50 border-blue-200', head:'text-blue-700' },
+  { id:'pending_approval', label:'Pending Approval', badge:'bg-amber-100 text-amber-700', col:'bg-amber-50/50 border-amber-200', head:'text-amber-700' },
+  { id:'released', label:'Released', badge:'bg-emerald-100 text-emerald-700', col:'bg-emerald-50/50 border-emerald-200', head:'text-emerald-700' },
+  { id:'closed', label:'Closed', badge:'bg-slate-200 text-slate-600', col:'bg-slate-50 border-slate-200', head:'text-slate-600' },
+];
+function prStatusMeta(id){ return PR_STATUSES.find(s=>s.id===id) || PR_STATUSES[0]; }
+function updatePrTotalCost(){
+  const qty = Number(document.getElementById('pr-qty').value) || 0;
+  const unitCost = Number(document.getElementById('pr-unit-cost').value) || 0;
+  document.getElementById('pr-total-cost').textContent = fmtMVR(qty * unitCost);
+}
+function openPurchaseRequisitionForm(id){
+  const editing = id ? state.purchaseRequisitions.find(x=>x.id===id) : null;
+  const prNumber = editing ? editing.prNumber : '';
+  const requester = editing ? editing.requester : (authUser ? authUser.name : '');
+  const body = `
+    <div id="pr-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">PR Number *</label>
+        <input type="text" id="pr-number" value="${esc(prNumber)}" placeholder="e.g. PR-0001" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Requester *</label>
+        <input type="text" id="pr-requester" value="${esc(requester)}" placeholder="Who is requesting this?" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item name *</label>
+      <input type="text" id="pr-item-name" value="${editing?esc(editing.itemName||''):''}" placeholder="e.g. Office chairs" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item description</label>
+      <textarea id="pr-item-description" rows="2" placeholder="Specs, model, notes…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.itemDescription||''):''}</textarea>
+    </div>
+    <div class="grid grid-cols-3 gap-4 mb-2">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
+        <input type="number" min="0" step="any" id="pr-qty" value="${editing?editing.quantity:''}" oninput="updatePrTotalCost()" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Unit cost (MVR) *</label>
+        <input type="number" min="0" step="any" id="pr-unit-cost" value="${editing?editing.unitCost:''}" oninput="updatePrTotalCost()" placeholder="0.00" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Total cost</label>
+        <div id="pr-total-cost" class="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-sm font-semibold text-slate-700 num">${fmtMVR((editing?editing.quantity:0)*(editing?editing.unitCost:0))}</div>
+      </div>
+    </div>
+    <div class="text-[11px] text-slate-400 mb-4">Total cost = Quantity × Unit cost, calculated automatically.</div>
+    <div class="grid grid-cols-2 gap-4 mb-5">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Budget code</label>
+        <input type="text" id="pr-budget-code" value="${editing?esc(editing.budgetCode||''):''}" placeholder="e.g. BC-2026-014" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Status *</label>
+        <select id="pr-status" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${PR_STATUSES.map(s=>`<option value="${s.id}" ${(editing?editing.status:'open')===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="text-xs font-semibold text-slate-600 mb-2">Document links <span class="font-normal text-slate-400">(optional)</span></div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Purchase Requisition URL</label>
+        <input type="url" id="pr-url-pr" value="${editing?esc(editing.prUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Purchase Order URL</label>
+        <input type="url" id="pr-url-po" value="${editing?esc(editing.poUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Delivery Order URL</label>
+        <input type="url" id="pr-url-do" value="${editing?esc(editing.doUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Invoice URL</label>
+        <input type="url" id="pr-url-invoice" value="${editing?esc(editing.invoiceUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="flex justify-between items-center gap-2.5">
+      <div>${editing && canManageInventory() ? `<button class="px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50" onclick="deletePurchaseRequisition('${editing.id}')">Delete</button>` : ''}</div>
+      <div class="flex gap-2.5">
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="savePurchaseRequisition('${id||''}')">${editing?'Save changes':'Create requisition'}</button>
+      </div>
+    </div>
+  `;
+  openModal(editing ? 'Edit Purchase Requisition' : 'New Purchase Requisition', body, true);
+}
+function savePurchaseRequisition(id){
+  const errEl = document.getElementById('pr-error');
+  errEl.classList.add('hidden');
+  const prNumber = document.getElementById('pr-number').value.trim();
+  const requester = document.getElementById('pr-requester').value.trim();
+  const itemName = document.getElementById('pr-item-name').value.trim();
+  const itemDescription = document.getElementById('pr-item-description').value.trim();
+  const quantity = Number(document.getElementById('pr-qty').value);
+  const unitCost = Number(document.getElementById('pr-unit-cost').value);
+  const budgetCode = document.getElementById('pr-budget-code').value.trim();
+  const status = document.getElementById('pr-status').value;
+  const prUrl = document.getElementById('pr-url-pr').value.trim();
+  const poUrl = document.getElementById('pr-url-po').value.trim();
+  const doUrl = document.getElementById('pr-url-do').value.trim();
+  const invoiceUrl = document.getElementById('pr-url-invoice').value.trim();
+
+  if(!prNumber){ errEl.textContent='PR Number is required.'; errEl.classList.remove('hidden'); return; }
+  if(!requester){ errEl.textContent='Requester is required.'; errEl.classList.remove('hidden'); return; }
+  if(!itemName){ errEl.textContent='Item name is required.'; errEl.classList.remove('hidden'); return; }
+  if(!quantity || quantity<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
+  if(unitCost==null || isNaN(unitCost) || unitCost<0){ errEl.textContent='Enter a valid unit cost.'; errEl.classList.remove('hidden'); return; }
+  const dup = state.purchaseRequisitions.find(x=>x.prNumber.toLowerCase()===prNumber.toLowerCase() && x.id!==id);
+  if(dup){ errEl.textContent='That PR Number is already used by another requisition.'; errEl.classList.remove('hidden'); return; }
+
+  const totalCost = quantity * unitCost;
+  const editing = id ? state.purchaseRequisitions.find(x=>x.id===id) : null;
+  if(editing){
+    Object.assign(editing, { prNumber, requester, itemName, itemDescription, quantity, unitCost, totalCost, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl });
+    persistPurchaseRequisitionDoc(editing);
+    toast('Purchase requisition updated.');
+  } else {
+    const pr = {
+      id: uid(), prNumber, requester, itemName, itemDescription, quantity, unitCost, totalCost, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl,
+      createdByName: authUser ? authUser.name : null,
+      createdByEmail: authUser ? authUser.email : null,
+      createdAt: nowISO(),
+    };
+    state.purchaseRequisitions.push(pr);
+    persistPurchaseRequisitionDoc(pr);
+    toast('Purchase requisition created.');
+  }
+  closeModal();
+  rerenderMain();
+}
+function deletePurchaseRequisition(id){
+  if(!canManageInventory()){ toast('Only admins can delete purchase requisitions.', true); return; }
+  const pr = state.purchaseRequisitions.find(x=>x.id===id);
+  if(!pr) return;
+  confirmAction(`Delete requisition ${pr.prNumber}? This cannot be undone.`, ()=>{
+    state.purchaseRequisitions = state.purchaseRequisitions.filter(x=>x.id!==id);
+    deletePurchaseRequisitionDoc(id);
+    closeModal();
+    toast('Purchase requisition deleted.');
+    rerenderMain();
+  });
+}
+function prDocLinksHtml(pr){
+  const links = [
+    pr.prUrl ? { label:'PR', url:pr.prUrl } : null,
+    pr.poUrl ? { label:'PO', url:pr.poUrl } : null,
+    pr.doUrl ? { label:'DO', url:pr.doUrl } : null,
+    pr.invoiceUrl ? { label:'Invoice', url:pr.invoiceUrl } : null,
+  ].filter(Boolean);
+  if(!links.length) return '';
+  return `<div class="flex flex-wrap gap-1.5 mt-2">${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200">${esc(l.label)} ↗</a>`).join('')}</div>`;
+}
+function prCardHtml(pr){
+  return `
+    <div onclick="openPurchaseRequisitionForm('${pr.id}')" class="bg-white rounded-lg border border-slate-200 p-3.5 mb-3 cursor-pointer hover:border-brand-400 hover:shadow-sm transition-colors">
+      <div class="flex items-start justify-between gap-2 mb-1.5">
+        <span class="text-xs font-bold text-slate-800 num">${esc(pr.prNumber)}</span>
+        <span class="text-xs font-semibold text-slate-700 num shrink-0">${fmtMVR(pr.totalCost)}</span>
+      </div>
+      <div class="text-sm font-medium text-slate-800 mb-1 truncate" title="${esc(pr.itemName)}">${esc(pr.itemName)}</div>
+      <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${pr.budgetCode?(' · '+esc(pr.budgetCode)):''}</div>
+      <div class="text-[11.5px] text-slate-400">Qty ${fmtNum(pr.quantity)} × ${fmtMVR(pr.unitCost)}</div>
+      ${prDocLinksHtml(pr)}
+    </div>
+  `;
+}
+function viewPurchaseRequisitions(){
+  const list = [...state.purchaseRequisitions].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  const totalValue = list.reduce((s,pr)=>s+(pr.totalCost||0), 0);
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Purchase Requisitions</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Track purchase requests from request through approval, order, delivery and invoicing.</p>
+      </div>
+      <button onclick="openPurchaseRequisitionForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ New Purchase Requisition</button>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6 inline-block">
+      <div class="text-xs font-medium text-slate-500">Total value across ${list.length} requisition${list.length===1?'':'s'}</div>
+      <div class="text-lg font-extrabold text-slate-900 num">${fmtMVR(totalValue)}</div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      ${PR_STATUSES.map(s=>{
+        const colItems = list.filter(pr=>pr.status===s.id);
+        return `
+        <div class="rounded-xl border ${s.col} p-3.5 min-h-[160px]">
+          <div class="flex items-center justify-between mb-3 px-0.5">
+            <span class="text-xs font-bold uppercase tracking-wide ${s.head}">${esc(s.label)}</span>
+            <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full ${s.badge} text-[11px] font-bold">${colItems.length}</span>
+          </div>
+          ${colItems.length ? colItems.map(prCardHtml).join('') : `<div class="text-center py-8 text-[11.5px] text-slate-400">No requisitions here.</div>`}
+        </div>`;
+      }).join('')}
+    </div>
+  `;
 }
 function viewAssetTransactions(){
   const f = ui.assetTransactionsFilter;
