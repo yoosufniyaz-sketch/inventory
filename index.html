@@ -1414,6 +1414,8 @@ function qtyAt(p, locId){ return (p.stock && p.stock[locId]) || 0; }
 function openItemTransferForm(productId){
   if(state.products.length===0){ toast('Add at least one item before transferring stock.', true); return; }
   movementLineCount = 1;
+  currentMovementFormType = null;
+  currentMovementEditId = null;
   const preselect = productId ? getProduct(productId) : null;
   const fromId = LOCATIONS[0].id;
   const body = `
@@ -3168,6 +3170,8 @@ function openEditMovementForm(id){
   if(!canManageInventory()){ toast('Only admins can edit stock movements.', true); return; }
   const m = state.movements.find(x=>x.id===id);
   if(!m){ toast('That movement could not be found.', true); return; }
+  currentMovementFormType = m.type;
+  currentMovementEditId = id;
   const isIn = m.type==='in';
   const p = getProduct(m.productId);
   const body = `
@@ -3363,6 +3367,8 @@ function removeMovementLine(idx){
 function openMovementForm(type){
   if(state.products.length===0){ toast('Add at least one item before logging stock movements.', true); return; }
   movementLineCount = 1;
+  currentMovementFormType = type;
+  currentMovementEditId = null;
   const isIn = type==='in';
   const body = `
     <div id="mf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
@@ -3424,13 +3430,21 @@ function currentMovementLocationId(){
   const transferFromEl = document.getElementById('xf-from');
   return transferFromEl ? transferFromEl.value : '';
 }
+let currentMovementFormType = null; // 'in' | 'out' | null (null = transfer form, no acquisition-type concept)
+let currentMovementEditId = null; // set when editing an existing movement, so its own quantity doesn't count against itself
 function updateMovementHint(idx){
   const hint = document.getElementById('mf-hint-'+idx);
   const pid = document.getElementById('mf-product-'+idx).value;
   const locId = currentMovementLocationId();
   const p = getProduct(pid);
   const loc = getLocation(locId);
-  if(hint && p && loc) hint.textContent = 'Currently in stock at ' + loc.name + ': ' + fmtNum(qtyAt(p, locId)) + (p.sku ? ' · ' + p.sku : '');
+  if(!hint || !p || !loc) return;
+  let html = 'Currently in stock at ' + esc(loc.name) + ': ' + fmtNum(qtyAt(p, locId)) + (p.sku ? ' · ' + esc(p.sku) : '');
+  if(currentMovementFormType === 'out'){
+    const breakdown = ACQUISITION_TYPES.map(a => esc(a) + ' ' + fmtNum(acquisitionBalance(p.id, a, currentMovementEditId))).join(' · ');
+    html += '<div class="mt-0.5">Available by source: ' + breakdown + '</div>';
+  }
+  hint.innerHTML = html;
 }
 function updateAllMovementHints(){
   document.querySelectorAll('.mf-line-wrap').forEach(el=>updateMovementHint(el.dataset.line));
