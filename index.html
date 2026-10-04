@@ -542,6 +542,7 @@ async function initCloudIfConfigured(){
         listenToCloudHandovers();
         listenToCloudLocations();
         listenToCloudNotificationSettings();
+        listenToAllProfiles();
         ensureOwnProfileDoc(user, pendingExtra);
         listenToOwnProfile(user);
       } else {
@@ -2417,9 +2418,13 @@ function listenToAllProfiles(){
   allProfilesUnsub = () => {}; // set immediately so a same-tick callback can't cause reentrant re-subscription
   allProfilesUnsub = firestoreProfilesRef.onSnapshot(snap=>{
     state.profiles = snap.docs.map(d=>d.data());
-    if(ui.tab==='admin') render();
+    render();
   }, err=>{
-    toast('Could not load the user list — check Firestore rules allow admins to read all profiles.', true);
+    // Non-admins may be restricted from reading all profiles by Firestore rules — that's fine,
+    // the Requester dropdown and admin user list just gracefully fall back without this data.
+    if(ui.tab==='admin'){
+      toast('Could not load the user list — check Firestore rules allow admins to read all profiles.', true);
+    }
   });
 }
 function viewAdmin(){
@@ -3723,9 +3728,15 @@ function prLineItemHtml(idx, line){
         </div>
         <button type="button" onclick="removePrLineItem(${idx})" class="mt-6 text-slate-400 hover:text-rose-600 px-1 ${idx===0?'invisible':''}" title="Remove item">✕</button>
       </div>
-      <div class="mb-3">
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item description</label>
-        <input type="text" id="pr-item-description-${idx}" value="${esc(line.itemDescription||'')}" placeholder="Specs, model, notes…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item description</label>
+          <input type="text" id="pr-item-description-${idx}" value="${esc(line.itemDescription||'')}" placeholder="Specs, model, notes…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Budget code</label>
+          <input type="text" id="pr-budget-code-${idx}" value="${esc(line.budgetCode||'')}" placeholder="e.g. BC-2026-014" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
       </div>
       <div class="grid grid-cols-3 gap-3 mb-3">
         <div>
@@ -3886,17 +3897,11 @@ function openPurchaseRequisitionForm(id){
       <span class="text-xs font-semibold text-slate-600">Grand total:</span>
       <span id="pr-grand-total" class="text-sm font-extrabold text-slate-900 num">${fmtMVR(editing?editing.totalCost:0)}</span>
     </div>
-    <div class="grid grid-cols-2 gap-4 mb-5">
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Budget code</label>
-        <input type="text" id="pr-budget-code" value="${editing?esc(editing.budgetCode||''):''}" placeholder="e.g. BC-2026-014" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Status *</label>
-        <select id="pr-status" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
-          ${PR_STATUSES.map(s=>`<option value="${s.id}" ${(editing?editing.status:'open')===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
-        </select>
-      </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5 w-full sm:w-1/3">Status *</label>
+      <select id="pr-status" class="w-full sm:w-1/3 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+        ${PR_STATUSES.map(s=>`<option value="${s.id}" ${(editing?editing.status:'open')===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
+      </select>
     </div>
     <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
       Setting status to Closed automatically stocks in any line items linked to a stock item above, at the location selected — no separate Stock In entry needed.
@@ -3961,7 +3966,6 @@ function savePurchaseRequisition(id){
   const prNumber = document.getElementById('pr-number').value.trim();
   const requester = document.getElementById('pr-requester').value.trim();
   const locationId = document.getElementById('pr-location').value;
-  const budgetCode = document.getElementById('pr-budget-code').value.trim();
   const status = document.getElementById('pr-status').value;
   const prUrl = document.getElementById('pr-url-pr').value.trim();
   const poUrl = document.getElementById('pr-url-po').value.trim();
@@ -3980,6 +3984,7 @@ function savePurchaseRequisition(id){
     const idx = lineEl.dataset.line;
     const itemName = document.getElementById('pr-item-name-'+idx).value.trim();
     const itemDescription = document.getElementById('pr-item-description-'+idx).value.trim();
+    const budgetCode = document.getElementById('pr-budget-code-'+idx).value.trim();
     const quantity = Number(document.getElementById('pr-qty-'+idx).value);
     const unitCost = Number(document.getElementById('pr-unit-cost-'+idx).value);
     const linkedProductId = document.getElementById('pr-sku-id-'+idx).value || null;
@@ -3987,7 +3992,7 @@ function savePurchaseRequisition(id){
     if(!itemName){ errEl.textContent='Item name is required for every line.'; errEl.classList.remove('hidden'); return; }
     if(!quantity || quantity<=0){ errEl.textContent=`Enter a quantity greater than zero for ${itemName}.`; errEl.classList.remove('hidden'); return; }
     if(unitCost==null || isNaN(unitCost) || unitCost<0){ errEl.textContent=`Enter a valid unit cost for ${itemName}.`; errEl.classList.remove('hidden'); return; }
-    lineItems.push({ itemName, itemDescription, quantity, unitCost, totalCost: quantity*unitCost, linkedProductId, linkedAssetId, stockedIn: wasLineAlreadyStockedIn(id, linkedProductId) });
+    lineItems.push({ itemName, itemDescription, budgetCode, quantity, unitCost, totalCost: quantity*unitCost, linkedProductId, linkedAssetId, stockedIn: wasLineAlreadyStockedIn(id, linkedProductId) });
   }
   if(!lineItems.length){ errEl.textContent='Add at least one item.'; errEl.classList.remove('hidden'); return; }
 
@@ -3996,7 +4001,7 @@ function savePurchaseRequisition(id){
   const wasAlreadyClosed = editing ? editing.status === 'closed' : false;
 
   if(editing){
-    Object.assign(editing, { prNumber, requester, locationId, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost });
+    Object.assign(editing, { prNumber, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost });
     if(status === 'closed' && !wasAlreadyClosed){
       applyPrAutoStockIn(editing);
       toast('Purchase requisition closed — linked stock items added to inventory.');
@@ -4006,7 +4011,7 @@ function savePurchaseRequisition(id){
     persistPurchaseRequisitionDoc(editing);
   } else {
     const pr = {
-      id: uid(), prNumber, requester, locationId, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost,
+      id: uid(), prNumber, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost,
       createdByName: authUser ? authUser.name : null,
       createdByEmail: authUser ? authUser.email : null,
       createdAt: nowISO(),
@@ -4051,6 +4056,12 @@ function prDocLinksHtml(pr){
   if(!links.length) return '';
   return `<div class="flex flex-wrap gap-1.5 mt-2">${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200">${esc(l.label)} ↗</a>`).join('')}</div>`;
 }
+function prCardBudgetCodeSummary(items){
+  const codes = [...new Set(items.map(l=>l.budgetCode).filter(Boolean))];
+  if(!codes.length) return '';
+  if(codes.length===1) return ' · ' + esc(codes[0]);
+  return ' · ' + codes.length + ' budget codes';
+}
 function prCardHtml(pr){
   const items = pr.lineItems || [];
   const loc = getLocation(pr.locationId);
@@ -4063,14 +4074,14 @@ function prCardHtml(pr){
         <span class="text-xs font-semibold text-slate-700 num shrink-0">${fmtMVR(pr.totalCost)}</span>
       </div>
       <div class="text-sm font-medium text-slate-800 mb-1 truncate" title="${esc(firstItemName)}">${esc(firstItemName)}${extraCount>0?` <span class="text-slate-400 font-normal">+${extraCount} more</span>`:''}</div>
-      <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${pr.budgetCode?(' · '+esc(pr.budgetCode)):''}</div>
+      <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${prCardBudgetCodeSummary(items)}</div>
       <div class="text-[11.5px] text-slate-400">${loc?esc(loc.name):'—'} · ${items.length} item${items.length===1?'':'s'}</div>
       ${prDocLinksHtml(pr)}
     </div>
   `;
 }
 function exportPurchaseRequisitionsCSV(){
-  const header = ['PR Number','Requester','Location','Budget Code','Status','Item Name','Item Description','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL'];
+  const header = ['PR Number','Requester','Location','Status','Item Name','Item Description','Budget Code','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL'];
   const rows = [];
   state.purchaseRequisitions.forEach(pr=>{
     const loc = getLocation(pr.locationId);
@@ -4078,8 +4089,8 @@ function exportPurchaseRequisitionsCSV(){
       const linkedProduct = line.linkedProductId ? getProduct(line.linkedProductId) : null;
       const linkedAsset = line.linkedAssetId ? state.assets.find(a=>a.id===line.linkedAssetId) : null;
       rows.push([
-        pr.prNumber, pr.requester, loc?loc.name:'', pr.budgetCode||'', prStatusMeta(pr.status).label,
-        line.itemName, line.itemDescription||'', line.quantity, line.unitCost, line.totalCost,
+        pr.prNumber, pr.requester, loc?loc.name:'', prStatusMeta(pr.status).label,
+        line.itemName, line.itemDescription||'', line.budgetCode||'', line.quantity, line.unitCost, line.totalCost,
         linkedProduct?(linkedProduct.sku||''):'', linkedAsset?(linkedAsset.departmentAssetCode||linkedAsset.tag||''):'', line.stockedIn?'Yes':'No',
         pr.prUrl||'', pr.poUrl||'', pr.doUrl||'', pr.invoiceUrl||'',
       ]);
