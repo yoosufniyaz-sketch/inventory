@@ -49,7 +49,26 @@
   /* Purchase requisitions: one long banner per requisition.
      Layout follows the width of the list itself (container query), not the screen:
      wide = a single row, medium = three short rows, narrow = a simple stack. */
-  .pr-list{ container-type: inline-size; display: flex; flex-direction: column; gap: .75rem; }
+  /* Page header and filter row: side by side when there's room, a tidy stack when there isn't */
+  .pr-page{ container: prpage / inline-size; }
+  .pr-head{ display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+  .pr-head-text{ flex: 1 1 0; min-width: 0; }
+  .pr-head-actions{ display: flex; gap: .625rem; flex-shrink: 0; }
+  .pr-toolbar{ display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+  .pr-pills{ display: flex; flex-wrap: wrap; gap: .5rem; flex: 1 1 0; min-width: 0; }
+  .pr-sort{ display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+  @container prpage (max-width: 740px){
+    .pr-head{ flex-direction: column; gap: .875rem; }
+    .pr-head-actions{ width: 100%; }
+    .pr-head-actions > button{ flex: 1 1 0; justify-content: center; }
+    .pr-toolbar{ flex-direction: column; align-items: stretch; gap: .75rem; }
+    .pr-sort{ width: 100%; }
+    .pr-sort select{ flex: 1 1 0; min-width: 0; }
+  }
+  @container prpage (max-width: 460px){
+    .pr-head-actions{ flex-direction: column-reverse; }   /* primary action first, one per row */
+  }
+  .pr-list{ container: prlist / inline-size; display: flex; flex-direction: column; gap: .75rem; }
   .pr-banner{ position: relative; overflow: hidden; cursor: pointer; min-height: 5.25rem;
               display: grid; grid-template-columns: minmax(0,1fr) auto; column-gap: 1rem; row-gap: .25rem; align-items: center;
               padding: .875rem 6rem .875rem 1rem; }
@@ -64,7 +83,7 @@
   .pr-ribbon{ position: absolute; top: 24px; right: -42px; width: 160px; text-align: center; transform: rotate(45deg);
               padding: 4px 0; font-size: 10px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase;
               box-shadow: 0 1px 2px rgba(0,0,0,.25); }
-  @container (min-width: 1020px){
+  @container prlist (min-width: 1020px){
     .pr-banner{ grid-template-columns: 10.5rem minmax(0,1.5fr) minmax(0,1fr) 9rem 10.5rem; column-gap: 1.25rem; }
     .pr-banner .pb-num   { grid-column: 1; grid-row: 1; }
     .pr-banner .pb-items { grid-column: 2; grid-row: 1; }
@@ -72,7 +91,7 @@
     .pr-banner .pb-where { grid-column: 4; grid-row: 1; text-align: left; }
     .pr-banner .pb-total { grid-column: 5; grid-row: 1; }
   }
-  @container (max-width: 540px){
+  @container prlist (max-width: 540px){
     .pr-banner{ grid-template-columns: minmax(0,1fr); padding-right: 4.5rem; }
     .pr-banner .pb-num, .pr-banner .pb-total, .pr-banner .pb-items, .pr-banner .pb-who, .pr-banner .pb-where{ grid-column: 1; text-align: left; }
     .pr-banner .pb-num{ grid-row: 1; } .pr-banner .pb-total{ grid-row: 2; } .pr-banner .pb-items{ grid-row: 3; }
@@ -4482,24 +4501,27 @@ function viewPurchaseRequisitions(){
   const all = [...state.purchaseRequisitions].sort(prSortCompare(currentPrSort()));
   const list = ui.prStatusFilter ? all.filter(pr=>pr.status===ui.prStatusFilter) : all;
   return `
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
-      <div>
+    <div class="pr-page">
+    <div class="pr-head">
+      <div class="pr-head-text">
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Purchase Requisitions</h1>
         <p class="text-sm text-slate-500 mt-0.5">Track purchase requests from request through approval, order, delivery and invoicing.</p>
       </div>
-      <div class="flex gap-2.5">
+      <div class="pr-head-actions">
         <button onclick="exportPurchaseRequisitionsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
         <button onclick="openPurchaseRequisitionForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ New Purchase Requisition</button>
       </div>
     </div>
-    <div class="flex flex-wrap items-center gap-2 mb-6">
+    <div class="pr-toolbar">
+      <div class="pr-pills">
       <button onclick="ui.prStatusFilter=''; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!ui.prStatusFilter?'bg-brand-600 border-brand-600 text-white':'border-slate-300 text-slate-600 hover:bg-slate-50'}">All <span class="opacity-75">${all.length}</span></button>
       ${PR_STATUSES.map(s=>{
         const count = all.filter(pr=>pr.status===s.id).length;
         const active = ui.prStatusFilter===s.id;
         return `<button onclick="ui.prStatusFilter='${s.id}'; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${active?(s.ribbon+' '+s.ribbonText+' border-transparent'):'border-slate-300 text-slate-600 hover:bg-slate-50'}">${esc(s.label)} <span class="opacity-75">${count}</span></button>`;
       }).join('')}
-      <label class="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">Sort
+      </div>
+      <label class="pr-sort text-xs font-semibold text-slate-600">Sort
         <select id="pr-sort" onchange="setPrSort(this.value)" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium bg-white">
           ${PR_SORTS.map(s=>`<option value="${s.id}" ${currentPrSort()===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
         </select>
@@ -4508,6 +4530,7 @@ function viewPurchaseRequisitions(){
     ${prBudgetBreakdownHtml(list)}
     <div class="pr-list">
       ${list.length ? list.map(prCardHtml).join('') : `<div class="text-center py-16 text-sm text-slate-400">${ui.prStatusFilter ? 'No requisitions with this status.' : 'No purchase requisitions yet — create one to get started.'}</div>`}
+    </div>
     </div>
   `;
 }
