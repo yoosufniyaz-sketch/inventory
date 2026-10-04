@@ -40,6 +40,12 @@
   .sticky-thead th{ position: sticky; top: 3.5rem; z-index: 15; background: #fff; box-shadow: 0 1px 0 0 rgb(241 245 249); }
   @media (min-width: 1024px){ .sticky-thead th{ top: 0; } }
 
+  /* Purchase requisition form: keep the header fields pinned while scrolling a long list of items
+     (only where there's room: not on phones or very short windows) */
+  /* top offset cancels the modal overlay's own padding (sm:p-6 = 1.5rem) so the block pins flush with the top of the window */
+  .pr-sticky-head{ position: sticky; top: -1.5rem; z-index: 20; }
+  @media (max-width: 639px), (max-height: 599px){ .pr-sticky-head{ position: static; } }
+
   /* ---------- Dark mode ---------- */
   html[data-theme="dark"]{ color-scheme: dark; }
   html[data-theme="dark"] body.bg-slate-100{ background-color: #0f172a; }
@@ -215,6 +221,7 @@ const ui = {
   assetTransactionsFilter: { search:'', locationId:'', dateFrom:'', dateTo:'' },
   prStatusFilter: '',
   prBudgetOpen: true,
+  prSort: null,
   selectedAssetId: null,
   sidebarOpen: false,
 };
@@ -3817,6 +3824,39 @@ function prValueByBudgetCode(list){
   });
   return [...groups.values()].sort((a,b)=> (a.unassigned - b.unassigned) || (b.total - a.total) || a.code.localeCompare(b.code));
 }
+const PR_SORTS = [
+  { id:'number_desc', label:'PR number · high to low' },
+  { id:'number_asc',  label:'PR number · low to high' },
+  { id:'date_desc',   label:'Requisition date · newest first' },
+  { id:'date_asc',    label:'Requisition date · oldest first' },
+];
+// numeric-aware, so 'PR-5' sorts before 'PR-12' and 'FDC-2026-PR-00838' before 'FDC-2026-PR-01017'
+const prNumberCollator = new Intl.Collator(undefined, { numeric:true, sensitivity:'base' });
+function prSortCompare(sortId){
+  const num  = (a,b) => prNumberCollator.compare(a.prNumber||'', b.prNumber||'');
+  const date = (a,b) => prRequisitionDate(a).localeCompare(prRequisitionDate(b));
+  const made = (a,b) => (a.createdAt||'').localeCompare(b.createdAt||'');
+  switch(sortId){
+    case 'number_asc': return (a,b) => num(a,b) || made(a,b);
+    case 'date_desc':  return (a,b) => date(b,a) || num(b,a);
+    case 'date_asc':   return (a,b) => date(a,b) || num(a,b);
+    default:           return (a,b) => num(b,a) || made(b,a);   // number_desc
+  }
+}
+function currentPrSort(){
+  if(!ui.prSort){
+    let saved = null;
+    try{ saved = localStorage.getItem(STORAGE_PREFIX + 'prSort'); }catch(e){}
+    ui.prSort = PR_SORTS.some(s=>s.id===saved) ? saved : 'number_desc';
+  }
+  return ui.prSort;
+}
+function setPrSort(id){
+  if(!PR_SORTS.some(s=>s.id===id)) return;
+  ui.prSort = id;
+  try{ localStorage.setItem(STORAGE_PREFIX + 'prSort', id); }catch(e){}
+  rerenderMain();
+}
 function prBudgetBreakdownHtml(list){
   const rows = prValueByBudgetCode(list);
   const grand = rows.reduce((s,r)=>s+r.total, 0);
@@ -4028,8 +4068,9 @@ function openPurchaseRequisitionForm(id){
   const requisitionDate = editing ? prRequisitionDate(editing) : localDateStr();
   prLineCount = lines.length;
   const body = `
+    <div class="pr-sticky-head bg-white border-b border-slate-200 -mx-5 sm:-mx-6 px-5 sm:px-6 -mt-5 pt-5 pb-4 mb-4">
     <div id="pr-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">PR Number *</label>
         <input type="text" id="pr-number" value="${esc(prNumber)}" placeholder="e.g. PR-0001" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
@@ -4055,6 +4096,7 @@ function openPurchaseRequisitionForm(id){
           ${LOCATIONS.map(l=>`<option value="${l.id}" ${(editing?editing.locationId:'')===l.id?'selected':''}>${esc(l.name)} (${esc(l.code)})</option>`).join('')}
         </select>
       </div>
+    </div>
     </div>
     <div class="text-xs font-semibold text-slate-600 mb-2">Items</div>
     <div id="pr-lines">${lines.map((line,idx)=>prLineItemHtml(idx, line)).join('')}</div>
@@ -4256,7 +4298,7 @@ function prCardHtml(pr){
 function exportPurchaseRequisitionsCSV(){
   const header = ['PR Number','Requisition Date','Requester','Location','Status','Item Name','Item Description','Budget Code','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL'];
   const rows = [];
-  state.purchaseRequisitions.forEach(pr=>{
+  [...state.purchaseRequisitions].sort(prSortCompare(currentPrSort())).forEach(pr=>{
     const loc = getLocation(pr.locationId);
     (pr.lineItems||[]).forEach(line=>{
       const linkedProduct = line.linkedProductId ? getProduct(line.linkedProductId) : null;
@@ -4273,7 +4315,7 @@ function exportPurchaseRequisitionsCSV(){
   downloadCSV('purchase_requisitions_' + todayStr() + '.csv', header, rows);
 }
 function viewPurchaseRequisitions(){
-  const all = [...state.purchaseRequisitions].sort((a,b)=> prRequisitionDate(b).localeCompare(prRequisitionDate(a)) || (b.createdAt||'').localeCompare(a.createdAt||''));
+  const all = [...state.purchaseRequisitions].sort(prSortCompare(currentPrSort()));
   const totalValue = all.reduce((s,pr)=>s+(pr.totalCost||0), 0);
   const list = ui.prStatusFilter ? all.filter(pr=>pr.status===ui.prStatusFilter) : all;
   return `
@@ -4291,13 +4333,18 @@ function viewPurchaseRequisitions(){
       <div class="text-xs font-medium text-slate-500">Total value across ${all.length} requisition${all.length===1?'':'s'}</div>
       <div class="text-lg font-extrabold text-slate-900 num">${fmtMVR(totalValue)}</div>
     </div>
-    <div class="flex flex-wrap gap-2 mb-6">
+    <div class="flex flex-wrap items-center gap-2 mb-6">
       <button onclick="ui.prStatusFilter=''; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!ui.prStatusFilter?'bg-brand-600 border-brand-600 text-white':'border-slate-300 text-slate-600 hover:bg-slate-50'}">All <span class="opacity-75">${all.length}</span></button>
       ${PR_STATUSES.map(s=>{
         const count = all.filter(pr=>pr.status===s.id).length;
         const active = ui.prStatusFilter===s.id;
         return `<button onclick="ui.prStatusFilter='${s.id}'; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${active?(s.ribbon+' '+s.ribbonText+' border-transparent'):'border-slate-300 text-slate-600 hover:bg-slate-50'}">${esc(s.label)} <span class="opacity-75">${count}</span></button>`;
       }).join('')}
+      <label class="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">Sort
+        <select id="pr-sort" onchange="setPrSort(this.value)" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium bg-white">
+          ${PR_SORTS.map(s=>`<option value="${s.id}" ${currentPrSort()===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
+        </select>
+      </label>
     </div>
     ${prBudgetBreakdownHtml(list)}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
