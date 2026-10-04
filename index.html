@@ -271,95 +271,103 @@ async function setJSON(key, value){
 function stripImagesForLocalCache(list){
   return list.map(x=> x && x.image ? {...x, image:''} : x);
 }
+function syncErrorMessage(e, collectionName, action){
+  const isPermissionError = e && (e.code==='permission-denied' || (e.message||'').toLowerCase().includes('permission'));
+  const verb = action==='delete' ? 'Deleted' : 'Saved';
+  if(isPermissionError){
+    return `${verb} locally, but Firestore rules are blocking sync for ${collectionName} — check Firestore Database → Rules covers this collection.`;
+  }
+  return `${verb} locally, but could not sync to the cloud right now${e && e.message ? (': ' + e.message) : ''}.`;
+}
 async function persistItemDoc(item){
   await setJSON('products', firestoreItemsRef ? stripImagesForLocalCache(state.products) : state.products);
   if(firestoreItemsRef){
     try{ await firestoreItemsRef.doc(item.id).set(item); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_items', 'save'), true); }
   }
 }
 async function deleteItemDoc(id){
   await setJSON('products', firestoreItemsRef ? stripImagesForLocalCache(state.products) : state.products);
   if(firestoreItemsRef){
     try{ await firestoreItemsRef.doc(id).delete(); }
-    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_items', 'delete'), true); }
   }
 }
 async function persistMovementDoc(m){
   await setJSON('movements', state.movements);
   if(firestoreMovementsRef){
     try{ await firestoreMovementsRef.doc(m.id).set(m); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_movements', 'save'), true); }
   }
 }
 async function deleteMovementDoc(id){
   await setJSON('movements', state.movements);
   if(firestoreMovementsRef){
     try{ await firestoreMovementsRef.doc(id).delete(); }
-    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_movements', 'delete'), true); }
   }
 }
 async function persistAssetDoc(asset){
   await setJSON('assets', firestoreAssetsRef ? stripImagesForLocalCache(state.assets) : state.assets);
   if(firestoreAssetsRef){
     try{ await firestoreAssetsRef.doc(asset.id).set(asset); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_assets', 'save'), true); }
   }
 }
 async function deleteAssetDoc(id){
   await setJSON('assets', firestoreAssetsRef ? stripImagesForLocalCache(state.assets) : state.assets);
   if(firestoreAssetsRef){
     try{ await firestoreAssetsRef.doc(id).delete(); }
-    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_assets', 'delete'), true); }
   }
 }
 async function persistAssetTransferDoc(t){
   await setJSON('assetTransfers', state.assetTransfers);
   if(firestoreAssetTransfersRef){
     try{ await firestoreAssetTransfersRef.doc(t.id).set(t); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_asset_transfers', 'save'), true); }
   }
 }
 async function deleteAssetTransferDoc(id){
   await setJSON('assetTransfers', state.assetTransfers);
   if(firestoreAssetTransfersRef){
     try{ await firestoreAssetTransfersRef.doc(id).delete(); }
-    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_asset_transfers', 'delete'), true); }
   }
 }
 async function persistItemTransferDoc(t){
   await setJSON('itemTransfers', state.itemTransfers);
   if(firestoreItemTransfersRef){
     try{ await firestoreItemTransfersRef.doc(t.id).set(t); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_item_transfers', 'save'), true); }
   }
 }
 async function persistPurchaseRequisitionDoc(pr){
   await setJSON('purchaseRequisitions', state.purchaseRequisitions);
   if(firestorePurchaseRequisitionsRef){
     try{ await firestorePurchaseRequisitionsRef.doc(pr.id).set(pr); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_purchase_requisitions', 'save'), true); }
   }
 }
 async function deletePurchaseRequisitionDoc(id){
   await setJSON('purchaseRequisitions', state.purchaseRequisitions);
   if(firestorePurchaseRequisitionsRef){
     try{ await firestorePurchaseRequisitionsRef.doc(id).delete(); }
-    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_purchase_requisitions', 'delete'), true); }
   }
 }
 async function persistHandoverDoc(h){
   await setJSON('handovers', state.handovers);
   if(firestoreHandoversRef){
     try{ await firestoreHandoversRef.doc(h.id).set(h); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_handovers', 'save'), true); }
   }
 }
 async function deleteHandoverDoc(id){
   await setJSON('handovers', state.handovers);
   if(firestoreHandoversRef){
     try{ await firestoreHandoversRef.doc(id).delete(); }
-    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_handovers', 'delete'), true); }
   }
 }
 
@@ -680,7 +688,7 @@ async function persistLocations(){
   await setJSON('locations', LOCATIONS);
   if(firestoreDb){
     try{ await firestoreDb.collection('fdc_inventory_meta').doc('locations').set({ list: LOCATIONS }); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, "fdc_inventory_meta (locations doc)", 'save'), true); }
   }
 }
 function listenToCloudNotificationSettings(){
@@ -697,7 +705,7 @@ async function persistNotificationSettings(){
   await setJSON('notificationSettings', notificationSettings);
   if(firestoreDb){
     try{ await firestoreDb.collection('fdc_inventory_meta').doc('notificationSettings').set(notificationSettings); }
-    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+    catch(e){ toast(syncErrorMessage(e, "fdc_inventory_meta (notificationSettings doc)", 'save'), true); }
   }
 }
 function reorderLevelAtForNotify(p, locId){
