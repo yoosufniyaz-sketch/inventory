@@ -306,6 +306,123 @@ async function setJSON(key, value){
 function stripImagesForLocalCache(list){
   return list.map(x=> x && x.image ? {...x, image:''} : x);
 }
+/* =====================================================================
+   CLOUD SYNC SAFETY — never lose records that exist only on this device.
+   A record counts as "synced" once the cloud has confirmed it (it arrived in a
+   snapshot, or our write was acknowledged). Anything else is kept when the cloud
+   answers with a shorter list, and can be uploaded with one click.
+===================================================================== */
+const SYNC_GUARDED = {
+  itemTransfers:        { one:'item transfer',        label:'item transfers',        collection:'fdc_inventory_item_transfers',        ref:()=>firestoreItemTransfersRef,        listen:()=>listenToCloudItemTransfers() },
+  purchaseRequisitions: { one:'purchase requisition', label:'purchase requisitions', collection:'fdc_inventory_purchase_requisitions', ref:()=>firestorePurchaseRequisitionsRef, listen:()=>listenToCloudPurchaseRequisitions() },
+  handovers:            { one:'handover',             label:'handovers',             collection:'fdc_inventory_handovers',             ref:()=>firestoreHandoversRef,            listen:()=>listenToCloudHandovers() },
+};
+const UNSYNCED_GRACE_MS = 15000; // a record saved a moment ago may still be on its way to the cloud
+const syncedIdSets = {};
+const syncListenerStatus = {};   // key -> 'ok' | 'error' (set once the cloud has answered, either way)
+function syncedIds(key){
+  if(!syncedIdSets[key]){
+    let arr = [];
+    try{ arr = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'synced_' + key) || '[]'); }catch(e){}
+    syncedIdSets[key] = new Set(Array.isArray(arr) ? arr : []);
+  }
+  return syncedIdSets[key];
+}
+function persistSyncedIds(key){
+  try{ localStorage.setItem(STORAGE_PREFIX + 'synced_' + key, JSON.stringify([...syncedIds(key)])); }catch(e){}
+}
+function markSynced(key, id){ const s = syncedIds(key); if(!s.has(id)){ s.add(id); persistSyncedIds(key); } }
+function forgetSynced(key, id){ const s = syncedIds(key); if(s.delete(id)) persistSyncedIds(key); }
+function resetSyncTracking(){
+  Object.keys(SYNC_GUARDED).forEach(k=>{
+    delete syncedIdSets[k]; delete syncListenerStatus[k];
+    try{ localStorage.removeItem(STORAGE_PREFIX + 'synced_' + k); }catch(e){}
+  });
+}
+function applyCloudSnapshot(key, snap){
+  const cloud = snap.docs.map(d=>d.data());
+  const cloudIds = new Set(cloud.map(r=>r.id));
+  const known = syncedIds(key);
+  // never confirmed by the cloud and not in it now: it only exists here, so keep it
+  const localOnly = (state[key]||[]).filter(r => r && r.id && !cloudIds.has(r.id) && !known.has(r.id));
+  // confirmed before but gone now: it was deleted elsewhere
+  [...known].forEach(id => { if(!cloudIds.has(id)) known.delete(id); });
+  snap.docs.forEach(d => { if(!(d.metadata && d.metadata.hasPendingWrites)) known.add(d.data().id); });
+  persistSyncedIds(key);
+  state[key] = cloud.concat(localOnly);
+  setJSON(key, state[key]);
+  syncListenerStatus[key] = 'ok';
+}
+function syncListenerError(key, err){
+  syncListenerStatus[key] = 'error';
+  handleCloudSyncError(err, SYNC_GUARDED[key].label);
+}
+function unsyncedRecords(key, opts){
+  const known = syncedIds(key);
+  const now = Date.now();
+  return (state[key]||[]).filter(r=>{
+    if(!r || !r.id || known.has(r.id)) return false;
+    if(opts && opts.ignoreGrace) return true;
+    const t = r.createdAt ? Date.parse(r.createdAt) : NaN;
+    return !(t && now - t < UNSYNCED_GRACE_MS);
+  });
+}
+function unsyncedSummary(opts){
+  const parts = [];
+  if(firestoreDb && authUser){
+    Object.keys(SYNC_GUARDED).forEach(key=>{
+      if(!syncListenerStatus[key]) return;   // wait for the cloud's first answer before judging
+      const n = unsyncedRecords(key, opts).length;
+      if(n) parts.push({ key, count:n, text: n + ' ' + (n===1 ? SYNC_GUARDED[key].one : SYNC_GUARDED[key].label) });
+    });
+  }
+  return { total: parts.reduce((s,p)=>s+p.count, 0), parts };
+}
+function unsyncedBannerHtml(){
+  const s = unsyncedSummary();
+  if(!s.total) return '';
+  return `
+    <div class="bg-amber-50 text-amber-800 rounded-xl px-4 py-3 mb-5 flex items-center justify-between gap-3 flex-wrap">
+      <div class="text-sm leading-relaxed">Saved only on this device, not in the cloud yet: <span class="font-bold">${esc(s.parts.map(p=>p.text).join(', '))}</span>. Other devices can't see them, and signing out would remove them from this device.</div>
+      <button id="unsynced-upload-btn" onclick="uploadUnsyncedToCloud()" class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Upload to cloud</button>
+    </div>`;
+}
+let uploadingUnsynced = false;
+async function uploadUnsyncedToCloud(){
+  if(uploadingUnsynced) return;
+  if(!firestoreDb){ toast('Cloud sync is not connected.', true); return; }
+  uploadingUnsynced = true;
+  const btn = document.getElementById('unsynced-upload-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Uploading…'; }
+  let uploaded = 0, failure = null;
+  const touched = [];
+  try{
+    for(const key of Object.keys(SYNC_GUARDED)){
+      const cfg = SYNC_GUARDED[key];
+      const ref = cfg.ref();
+      if(!ref) continue;
+      const pending = unsyncedRecords(key, { ignoreGrace:true });
+      for(let i = 0; i < pending.length; i += 200){
+        const chunk = pending.slice(i, i + 200);
+        const batch = firestoreDb.batch();
+        chunk.forEach(r => batch.set(ref.doc(r.id), r));
+        try{ await batch.commit(); }
+        catch(e){ failure = { e, cfg }; break; }
+        chunk.forEach(r => markSynced(key, r.id));
+        uploaded += chunk.length;
+        if(!touched.includes(key)) touched.push(key);
+      }
+      if(failure) break;
+    }
+  } finally { uploadingUnsynced = false; }
+  // a listener that was blocked earlier stays dead until re-attached
+  touched.forEach(key => { try{ SYNC_GUARDED[key].listen(); }catch(e){} });
+  if(failure) toast(syncErrorMessage(failure.e, failure.cfg.collection, 'save'), true);
+  else toast(uploaded ? `Uploaded ${fmtNum(uploaded)} record${uploaded===1?'':'s'} to the cloud.` : 'Everything is already in the cloud.');
+  renderApp();
+}
+function scheduleUnsyncedCheck(){ setTimeout(()=>{ try{ renderApp(); }catch(e){} }, UNSYNCED_GRACE_MS + 500); }
+
 function syncErrorMessage(e, collectionName, action){
   const isPermissionError = e && (e.code==='permission-denied' || (e.message||'').toLowerCase().includes('permission'));
   const verb = action==='delete' ? 'Deleted' : 'Saved';
@@ -373,35 +490,35 @@ async function deleteAssetTransferDoc(id){
 async function persistItemTransferDoc(t){
   await setJSON('itemTransfers', state.itemTransfers);
   if(firestoreItemTransfersRef){
-    try{ await firestoreItemTransfersRef.doc(t.id).set(t); }
-    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_item_transfers', 'save'), true); }
+    try{ await firestoreItemTransfersRef.doc(t.id).set(t); markSynced('itemTransfers', t.id); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_item_transfers', 'save'), true); scheduleUnsyncedCheck(); }
   }
 }
 async function persistPurchaseRequisitionDoc(pr){
   await setJSON('purchaseRequisitions', state.purchaseRequisitions);
   if(firestorePurchaseRequisitionsRef){
-    try{ await firestorePurchaseRequisitionsRef.doc(pr.id).set(pr); }
-    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_purchase_requisitions', 'save'), true); }
+    try{ await firestorePurchaseRequisitionsRef.doc(pr.id).set(pr); markSynced('purchaseRequisitions', pr.id); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_purchase_requisitions', 'save'), true); scheduleUnsyncedCheck(); }
   }
 }
 async function deletePurchaseRequisitionDoc(id){
   await setJSON('purchaseRequisitions', state.purchaseRequisitions);
   if(firestorePurchaseRequisitionsRef){
-    try{ await firestorePurchaseRequisitionsRef.doc(id).delete(); }
+    try{ await firestorePurchaseRequisitionsRef.doc(id).delete(); forgetSynced('purchaseRequisitions', id); }
     catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_purchase_requisitions', 'delete'), true); }
   }
 }
 async function persistHandoverDoc(h){
   await setJSON('handovers', state.handovers);
   if(firestoreHandoversRef){
-    try{ await firestoreHandoversRef.doc(h.id).set(h); }
-    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_handovers', 'save'), true); }
+    try{ await firestoreHandoversRef.doc(h.id).set(h); markSynced('handovers', h.id); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_handovers', 'save'), true); scheduleUnsyncedCheck(); }
   }
 }
 async function deleteHandoverDoc(id){
   await setJSON('handovers', state.handovers);
   if(firestoreHandoversRef){
-    try{ await firestoreHandoversRef.doc(id).delete(); }
+    try{ await firestoreHandoversRef.doc(id).delete(); forgetSynced('handovers', id); }
     catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_handovers', 'delete'), true); }
   }
 }
@@ -539,6 +656,7 @@ function clearLocalDataCache(){
   localStorage.removeItem(STORAGE_PREFIX+'purchaseRequisitions');
   localStorage.removeItem(STORAGE_PREFIX+'handovers');
   localStorage.removeItem(STORAGE_PREFIX+'locations');
+  resetSyncTracking();
 }
 
 async function initCloudIfConfigured(){
@@ -688,26 +806,23 @@ function listenToCloudAssetTransfers(){
 function listenToCloudItemTransfers(){
   if(itemTransfersUnsub) itemTransfersUnsub();
   itemTransfersUnsub = firestoreItemTransfersRef.onSnapshot(snap=>{
-    state.itemTransfers = snap.docs.map(d=>d.data());
-    setJSON('itemTransfers', state.itemTransfers);
+    applyCloudSnapshot('itemTransfers', snap);
     renderApp();
-  }, err=> handleCloudSyncError(err, 'item transfers'));
+  }, err=> syncListenerError('itemTransfers', err));
 }
 function listenToCloudPurchaseRequisitions(){
   if(purchaseRequisitionsUnsub) purchaseRequisitionsUnsub();
   purchaseRequisitionsUnsub = firestorePurchaseRequisitionsRef.onSnapshot(snap=>{
-    state.purchaseRequisitions = snap.docs.map(d=>d.data());
-    setJSON('purchaseRequisitions', state.purchaseRequisitions);
+    applyCloudSnapshot('purchaseRequisitions', snap);
     renderApp();
-  }, err=> handleCloudSyncError(err, 'purchase requisitions'));
+  }, err=> syncListenerError('purchaseRequisitions', err));
 }
 function listenToCloudHandovers(){
   if(handoversUnsub) handoversUnsub();
   handoversUnsub = firestoreHandoversRef.onSnapshot(snap=>{
-    state.handovers = snap.docs.map(d=>d.data());
-    setJSON('handovers', state.handovers);
+    applyCloudSnapshot('handovers', snap);
     renderApp();
-  }, err=> handleCloudSyncError(err, 'handovers'));
+  }, err=> syncListenerError('handovers', err));
 }
 function listenToCloudLocations(){
   if(locationsUnsub) locationsUnsub();
@@ -923,7 +1038,11 @@ async function submitSignUp(){
   }
 }
 function signOutUser(){
-  confirmAction('Sign out?', async ()=>{
+  const s = unsyncedSummary({ ignoreGrace:true });
+  const msg = s.total
+    ? `${s.parts.map(p=>p.text).join(', ')} ${s.total===1?'is':'are'} saved only on this device and will be deleted from it when you sign out. Cancel and use "Upload to cloud" first — or sign out anyway?`
+    : 'Sign out?';
+  confirmAction(msg, async ()=>{
     closeModal();
     try{ await firebaseAuth.signOut(); }catch(e){}
   });
@@ -1388,6 +1507,7 @@ function render(){
     console.error(e);
     el.innerHTML = `<div class="text-center py-16 text-slate-500"><h3 class="text-base font-semibold text-slate-800 mb-1">Something went wrong</h3><p class="text-sm">${esc(e.message)}</p></div>`;
   }
+  try{ const banner = unsyncedBannerHtml(); if(banner) el.innerHTML = banner + el.innerHTML; }catch(e){}
   if(activeId){
     const newEl = document.getElementById(activeId);
     if(newEl && typeof newEl.focus === 'function'){
