@@ -4094,11 +4094,11 @@ function prCardHtml(pr){
   return `
     <div onclick="openPurchaseRequisitionForm('${pr.id}')" class="relative bg-white rounded-lg border border-slate-200 p-3.5 pr-16 cursor-pointer hover:border-brand-400 hover:shadow-sm transition-colors overflow-hidden">
       <div class="absolute top-[13px] right-[-34px] w-[140px] text-center text-[10px] font-bold uppercase tracking-wide py-1 rotate-45 ${s.ribbon} text-white shadow-sm">${esc(s.label)}</div>
-      <div class="flex items-start justify-between gap-2 mb-1.5">
-        <span class="text-xs font-bold text-slate-800 num">${esc(pr.prNumber)}</span>
+      <div class="text-xs font-bold text-slate-800 num whitespace-nowrap mb-1.5">${esc(pr.prNumber)}</div>
+      <div class="flex items-start justify-between gap-2 mb-1">
+        <div class="text-sm font-medium text-slate-800 truncate" title="${esc(firstItemName)}">${esc(firstItemName)}${extraCount>0?` <span class="text-slate-400 font-normal">+${extraCount} more</span>`:''}</div>
         <span class="text-xs font-semibold text-slate-700 num shrink-0">${fmtMVR(pr.totalCost)}</span>
       </div>
-      <div class="text-sm font-medium text-slate-800 mb-1 truncate" title="${esc(firstItemName)}">${esc(firstItemName)}${extraCount>0?` <span class="text-slate-400 font-normal">+${extraCount} more</span>`:''}</div>
       <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${prCardBudgetCodeSummary(items)}</div>
       <div class="text-[11.5px] text-slate-400">${loc?esc(loc.name):'—'} · ${items.length} item${items.length===1?'':'s'}</div>
       ${prDocLinksHtml(pr)}
