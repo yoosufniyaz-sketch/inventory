@@ -166,7 +166,7 @@
 /* =====================================================================
    STATE
 ===================================================================== */
-const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [], itemTransfers: [], purchaseRequisitions: [] };
+const state = { products: [], movements: [], profiles: [], assets: [], assetTransfers: [], itemTransfers: [], purchaseRequisitions: [], handovers: [] };
 const DEFAULT_LOCATIONS = [
   { id:'loc-ho',  name:'Head Office',  code:'HO',  color:'#6366f1' },
   { id:'loc-apt', name:'Apollo Tower', code:'APT', color:'#10b981' },
@@ -348,6 +348,20 @@ async function deletePurchaseRequisitionDoc(id){
     catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
   }
 }
+async function persistHandoverDoc(h){
+  await setJSON('handovers', state.handovers);
+  if(firestoreHandoversRef){
+    try{ await firestoreHandoversRef.doc(h.id).set(h); }
+    catch(e){ toast('Saved locally, but could not sync to the cloud right now.', true); }
+  }
+}
+async function deleteHandoverDoc(id){
+  await setJSON('handovers', state.handovers);
+  if(firestoreHandoversRef){
+    try{ await firestoreHandoversRef.doc(id).delete(); }
+    catch(e){ toast('Deleted locally, but could not sync to the cloud right now.', true); }
+  }
+}
 
 let storageDown = false;
 function markStorageDown(reason){
@@ -399,6 +413,7 @@ let firestoreAssetsRef = null;
 let firestoreAssetTransfersRef = null;
 let firestoreItemTransfersRef = null;
 let firestorePurchaseRequisitionsRef = null;
+let firestoreHandoversRef = null;
 let firestoreProfilesRef = null;
 let firebaseAuth = null;
 let itemsUnsub = null;
@@ -407,6 +422,7 @@ let assetsUnsub = null;
 let assetTransfersUnsub = null;
 let itemTransfersUnsub = null;
 let purchaseRequisitionsUnsub = null;
+let handoversUnsub = null;
 let locationsUnsub = null;
 let notifSettingsUnsub = null;
 let profileUnsub = null;
@@ -470,6 +486,7 @@ function clearLocalDataCache(){
   state.assetTransfers = [];
   state.itemTransfers = [];
   state.purchaseRequisitions = [];
+  state.handovers = [];
   LOCATIONS = DEFAULT_LOCATIONS.map(l=>({...l}));
   localStorage.removeItem(STORAGE_PREFIX+'products');
   localStorage.removeItem(STORAGE_PREFIX+'movements');
@@ -477,6 +494,7 @@ function clearLocalDataCache(){
   localStorage.removeItem(STORAGE_PREFIX+'assetTransfers');
   localStorage.removeItem(STORAGE_PREFIX+'itemTransfers');
   localStorage.removeItem(STORAGE_PREFIX+'purchaseRequisitions');
+  localStorage.removeItem(STORAGE_PREFIX+'handovers');
   localStorage.removeItem(STORAGE_PREFIX+'locations');
 }
 
@@ -514,12 +532,14 @@ async function initCloudIfConfigured(){
         firestoreAssetTransfersRef = firestoreDb.collection('fdc_inventory_asset_transfers');
         firestoreItemTransfersRef = firestoreDb.collection('fdc_inventory_item_transfers');
         firestorePurchaseRequisitionsRef = firestoreDb.collection('fdc_inventory_purchase_requisitions');
+        firestoreHandoversRef = firestoreDb.collection('fdc_inventory_handovers');
         listenToCloudItems();
         listenToCloudMovements();
         listenToCloudAssets();
         listenToCloudAssetTransfers();
         listenToCloudItemTransfers();
         listenToCloudPurchaseRequisitions();
+        listenToCloudHandovers();
         listenToCloudLocations();
         listenToCloudNotificationSettings();
         ensureOwnProfileDoc(user, pendingExtra);
@@ -532,12 +552,13 @@ async function initCloudIfConfigured(){
         if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
         if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
         if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
+        if(handoversUnsub){ handoversUnsub(); handoversUnsub = null; }
         if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
         if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
         if(profileUnsub){ profileUnsub(); profileUnsub = null; }
         if(allProfilesUnsub){ allProfilesUnsub(); allProfilesUnsub = null; }
         state.profiles = [];
-        firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null;
+        firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firestoreHandoversRef = null;
         clearLocalDataCache();
         cloudStatus = 'synced';
       }
@@ -636,6 +657,14 @@ function listenToCloudPurchaseRequisitions(){
     renderApp();
   }, err=> handleCloudSyncError(err, 'purchase requisitions'));
 }
+function listenToCloudHandovers(){
+  if(handoversUnsub) handoversUnsub();
+  handoversUnsub = firestoreHandoversRef.onSnapshot(snap=>{
+    state.handovers = snap.docs.map(d=>d.data());
+    setJSON('handovers', state.handovers);
+    renderApp();
+  }, err=> handleCloudSyncError(err, 'handovers'));
+}
 function listenToCloudLocations(){
   if(locationsUnsub) locationsUnsub();
   locationsUnsub = firestoreDb.collection('fdc_inventory_meta').doc('locations').onSnapshot(doc=>{
@@ -733,10 +762,11 @@ function disconnectCloud(){
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
     if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
     if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
+    if(handoversUnsub){ handoversUnsub(); handoversUnsub = null; }
     if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
     if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
     if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firestoreHandoversRef = null; firebaseAuth = null; authUser = null; cloudStatus = 'local';
     closeModal();
     toast('Cloud sync disconnected.');
     renderApp();
@@ -1039,7 +1069,8 @@ async function saveCloudConfig(){
     if(assetTransfersUnsub){ assetTransfersUnsub(); assetTransfersUnsub = null; }
     if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
     if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
-    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firebaseAuth = null; authUser = null;
+    if(handoversUnsub){ handoversUnsub(); handoversUnsub = null; }
+    firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firestoreHandoversRef = null; firebaseAuth = null; authUser = null;
     await initCloudIfConfigured();
   }catch(e){
     errEl.textContent = e.message; errEl.classList.remove('hidden');
@@ -1113,6 +1144,7 @@ const ICONS = {
   admin:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2.5 16.5 5v5c0 4-2.8 6.5-6.5 7.5-3.7-1-6.5-3.5-6.5-7.5V5z"/><path d="m7.2 10 1.8 1.8 3.8-3.8"/></svg>',
   locations:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 4.5 7 3l6 2 4.5-1.5v11L13 16l-6-2-4.5 1.5z"/><path d="M7 3v11M13 5v11"/></svg>',
   pr:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5.5 2.5h7l3 3v12h-10z"/><path d="M12.5 2.5v3h3"/><path d="M7 10.5h6M7 13h6M7 8h3"/></svg>',
+  handover:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 7 7 3l2 2-4.5 4z"/><path d="M4 5.5 7.5 9"/><path d="M17.5 13 13 17l-2-2 4.5-4z"/><path d="M16 14.5 12.5 11"/></svg>',
 };
 function canManageInventory(){ return !authUser || authUser.role==='admin'; }
 function canAcceptTransferForLocation(locationId){
@@ -1128,6 +1160,7 @@ const NAV_BASE = [
   { id:'assets', label:'Assets', icon:'assets' },
   { id:'asset-transactions', label:'Asset Movements', icon:'assettx' },
   { id:'purchase-requisitions', label:'Purchase Requisitions', icon:'pr' },
+  { id:'handovers', label:'Handovers', icon:'handover' },
 ];
 function currentNav(){
   const nav = [...NAV_BASE];
@@ -1206,13 +1239,14 @@ function confirmAction(message, onYes){
    INIT
 ===================================================================== */
 async function init(){
-  const [products, movements, assets, assetTransfers, itemTransfers, purchaseRequisitions, locations, savedNotifSettings] = await Promise.all([
+  const [products, movements, assets, assetTransfers, itemTransfers, purchaseRequisitions, handovers, locations, savedNotifSettings] = await Promise.all([
     getJSON('products', []),
     getJSON('movements', []),
     getJSON('assets', []),
     getJSON('assetTransfers', []),
     getJSON('itemTransfers', []),
     getJSON('purchaseRequisitions', []),
+    getJSON('handovers', []),
     getJSON('locations', null),
     getJSON('notificationSettings', null),
   ]);
@@ -1222,6 +1256,7 @@ async function init(){
   state.assetTransfers = assetTransfers || [];
   state.itemTransfers = itemTransfers || [];
   state.purchaseRequisitions = purchaseRequisitions || [];
+  state.handovers = handovers || [];
   if(Array.isArray(locations) && locations.length) LOCATIONS = locations;
   if(savedNotifSettings && typeof savedNotifSettings==='object') notificationSettings = Object.assign(notificationSettings, savedNotifSettings);
   const cfg = getCloudConfig();
@@ -1302,6 +1337,7 @@ function render(){
     else if(ui.tab==='asset-detail') el.innerHTML = viewAssetDetail();
     else if(ui.tab==='asset-transactions') el.innerHTML = viewAssetTransactions();
     else if(ui.tab==='purchase-requisitions') el.innerHTML = viewPurchaseRequisitions();
+    else if(ui.tab==='handovers') el.innerHTML = viewHandovers();
     else if(ui.tab==='locations') el.innerHTML = viewLocations();
     else if(ui.tab==='admin') el.innerHTML = viewAdmin();
   }catch(e){
@@ -2253,29 +2289,33 @@ const DEPARTMENTS = [
   { name: 'Public Relations', code: 'PR' },
   { name: 'Research and Development', code: 'R&D' },
 ];
-function departmentOptionsHtml(filterText){
+function departmentOptionsHtml(filterText, prefix){
+  prefix = prefix || 'mf';
   const f = (filterText||'').trim().toLowerCase();
   const list = DEPARTMENTS.filter(d => !f || d.name.toLowerCase().includes(f) || d.code.toLowerCase().includes(f));
   if(!list.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No matching department — you can still type a custom one.</div>`;
   return list.map(d => `
-    <button type="button" data-name="${esc(d.name)}" onmousedown="event.preventDefault(); selectDepartmentOption(this.dataset.name)" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+    <button type="button" data-name="${esc(d.name)}" onmousedown="event.preventDefault(); selectDepartmentOption(this.dataset.name, '${prefix}')" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
       <span class="truncate">${esc(d.name)}</span>
       <span class="text-[11px] text-slate-400 shrink-0 ml-2">${esc(d.code)}</span>
     </button>
   `).join('');
 }
-function filterDepartmentDropdown(){
-  const input = document.getElementById('mf-department');
-  const dropdown = document.getElementById('mf-department-dropdown');
+function filterDepartmentDropdown(prefix){
+  prefix = prefix || 'mf';
+  const input = document.getElementById(prefix+'-department');
+  const dropdown = document.getElementById(prefix+'-department-dropdown');
   if(!input || !dropdown) return;
-  dropdown.innerHTML = departmentOptionsHtml(input.value);
+  dropdown.innerHTML = departmentOptionsHtml(input.value, prefix);
   dropdown.classList.remove('hidden');
 }
-function hideDepartmentDropdown(){
-  setTimeout(()=>{ const d = document.getElementById('mf-department-dropdown'); if(d) d.classList.add('hidden'); }, 150);
+function hideDepartmentDropdown(prefix){
+  prefix = prefix || 'mf';
+  setTimeout(()=>{ const d = document.getElementById(prefix+'-department-dropdown'); if(d) d.classList.add('hidden'); }, 150);
 }
-function selectDepartmentOption(name){
-  document.getElementById('mf-department').value = name;
+function selectDepartmentOption(name, prefix){
+  prefix = prefix || 'mf';
+  document.getElementById(prefix+'-department').value = name;
 }
 function acquisitionBreakdown(list){
   const map = {};
@@ -3667,18 +3707,156 @@ const PR_STATUSES = [
   { id:'closed', label:'Closed', badge:'bg-slate-200 text-slate-600', col:'bg-slate-50 border-slate-200', head:'text-slate-600' },
 ];
 function prStatusMeta(id){ return PR_STATUSES.find(s=>s.id===id) || PR_STATUSES[0]; }
-function updatePrTotalCost(){
-  const qty = Number(document.getElementById('pr-qty').value) || 0;
-  const unitCost = Number(document.getElementById('pr-unit-cost').value) || 0;
-  document.getElementById('pr-total-cost').textContent = fmtMVR(qty * unitCost);
+let prLineCount = 1;
+function prLineItemSkuLabel(p){ return p ? (displayName(p) + (p.sku?(' ('+p.sku+')'):'')) : ''; }
+function prLineItemAssetLabel(a){ return a ? (a.name + (a.departmentAssetCode?(' ('+a.departmentAssetCode+')'):(a.tag?(' ('+a.tag+')'):''))) : ''; }
+function prLineItemHtml(idx, line){
+  line = line || {};
+  const linkedProduct = line.linkedProductId ? getProduct(line.linkedProductId) : null;
+  const linkedAsset = line.linkedAssetId ? state.assets.find(x=>x.id===line.linkedAssetId) : null;
+  return `
+    <div class="pr-line-wrap border border-slate-200 rounded-lg p-3.5 mb-3 bg-slate-50/50" data-line="${idx}">
+      <div class="flex items-start justify-between gap-2 mb-3">
+        <div class="flex-1">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item name *</label>
+          <input type="text" id="pr-item-name-${idx}" value="${esc(line.itemName||'')}" placeholder="e.g. Office chairs" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <button type="button" onclick="removePrLineItem(${idx})" class="mt-6 text-slate-400 hover:text-rose-600 px-1 ${idx===0?'invisible':''}" title="Remove item">✕</button>
+      </div>
+      <div class="mb-3">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item description</label>
+        <input type="text" id="pr-item-description-${idx}" value="${esc(line.itemDescription||'')}" placeholder="Specs, model, notes…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div class="grid grid-cols-3 gap-3 mb-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
+          <input type="number" min="0" step="any" id="pr-qty-${idx}" value="${line.quantity||''}" oninput="updatePrLineTotal(${idx})" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Unit cost (MVR) *</label>
+          <input type="number" min="0" step="any" id="pr-unit-cost-${idx}" value="${line.unitCost||''}" oninput="updatePrLineTotal(${idx})" placeholder="0.00" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Total cost</label>
+          <div id="pr-line-total-${idx}" class="w-full px-3.5 py-2.5 rounded-lg bg-white border border-slate-200 text-sm font-semibold text-slate-700 num">${fmtMVR((line.quantity||0)*(line.unitCost||0))}</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="relative">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Link to stock item <span class="font-normal text-slate-400">(optional — enables auto stock-in on close)</span></label>
+          <input type="text" id="pr-sku-search-${idx}" autocomplete="off" value="${esc(prLineItemSkuLabel(linkedProduct))}" placeholder="Search by name or SKU…"
+            oninput="filterPrLineSku(${idx})" onfocus="filterPrLineSku(${idx})" onblur="hidePrLineSkuDropdown(${idx})"
+            class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+          <input type="hidden" id="pr-sku-id-${idx}" value="${esc(line.linkedProductId||'')}">
+          <div id="pr-sku-dropdown-${idx}" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+        </div>
+        <div class="relative">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Link to asset <span class="font-normal text-slate-400">(optional)</span></label>
+          <input type="text" id="pr-asset-search-${idx}" autocomplete="off" value="${esc(prLineItemAssetLabel(linkedAsset))}" placeholder="Search by name or code…"
+            oninput="filterPrLineAsset(${idx})" onfocus="filterPrLineAsset(${idx})" onblur="hidePrLineAssetDropdown(${idx})"
+            class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+          <input type="hidden" id="pr-asset-id-${idx}" value="${esc(line.linkedAssetId||'')}">
+          <div id="pr-asset-dropdown-${idx}" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+        </div>
+      </div>
+      ${line.stockedIn ? `<div class="text-[11px] text-emerald-600 font-semibold mt-2">✓ Already stocked in automatically</div>` : ''}
+    </div>
+  `;
+}
+function addPrLineItem(){
+  const idx = prLineCount;
+  prLineCount++;
+  const wrap = document.getElementById('pr-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', prLineItemHtml(idx));
+  return idx;
+}
+function removePrLineItem(idx){
+  const el = document.querySelector(`.pr-line-wrap[data-line="${idx}"]`);
+  if(el) el.remove();
+  updatePrGrandTotal();
+}
+function updatePrLineTotal(idx){
+  const qty = Number(document.getElementById('pr-qty-'+idx).value) || 0;
+  const unitCost = Number(document.getElementById('pr-unit-cost-'+idx).value) || 0;
+  document.getElementById('pr-line-total-'+idx).textContent = fmtMVR(qty * unitCost);
+  updatePrGrandTotal();
+}
+function updatePrGrandTotal(){
+  let total = 0;
+  document.querySelectorAll('.pr-line-wrap').forEach(el=>{
+    const idx = el.dataset.line;
+    const qty = Number(document.getElementById('pr-qty-'+idx)?.value) || 0;
+    const unitCost = Number(document.getElementById('pr-unit-cost-'+idx)?.value) || 0;
+    total += qty * unitCost;
+  });
+  const grandEl = document.getElementById('pr-grand-total');
+  if(grandEl) grandEl.textContent = fmtMVR(total);
+}
+function prLineSkuOptionsHtml(filterText, idx){
+  const f = (filterText||'').trim().toLowerCase();
+  const matches = state.products.filter(p => !f || displayName(p).toLowerCase().includes(f) || (p.sku||'').toLowerCase().includes(f)).slice(0, 30);
+  if(!matches.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No matching item — you can still enter the item name manually above.</div>`;
+  return matches.map(p=>`
+    <button type="button" onmousedown="event.preventDefault(); selectPrLineSku('${p.id}', ${idx})" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+      <span class="truncate">${esc(displayName(p))}</span>
+      <span class="text-[11px] text-slate-400 shrink-0 ml-2">${esc(p.sku||'no SKU')}</span>
+    </button>
+  `).join('');
+}
+function filterPrLineSku(idx){
+  const input = document.getElementById('pr-sku-search-'+idx);
+  const dropdown = document.getElementById('pr-sku-dropdown-'+idx);
+  if(!input || !dropdown) return;
+  dropdown.innerHTML = prLineSkuOptionsHtml(input.value, idx);
+  dropdown.classList.remove('hidden');
+}
+function hidePrLineSkuDropdown(idx){
+  setTimeout(()=>{ const d = document.getElementById('pr-sku-dropdown-'+idx); if(d) d.classList.add('hidden'); }, 150);
+}
+function selectPrLineSku(productId, idx){
+  const p = getProduct(productId);
+  if(!p) return;
+  document.getElementById('pr-sku-search-'+idx).value = prLineItemSkuLabel(p);
+  document.getElementById('pr-sku-id-'+idx).value = productId;
+  const nameInput = document.getElementById('pr-item-name-'+idx);
+  if(nameInput && !nameInput.value.trim()) nameInput.value = displayName(p);
+}
+function prLineAssetOptionsHtml(filterText, idx){
+  const f = (filterText||'').trim().toLowerCase();
+  const matches = state.assets.filter(a => !f || a.name.toLowerCase().includes(f) || (a.departmentAssetCode||'').toLowerCase().includes(f) || (a.tag||'').toLowerCase().includes(f)).slice(0, 30);
+  if(!matches.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No matching asset.</div>`;
+  return matches.map(a=>`
+    <button type="button" onmousedown="event.preventDefault(); selectPrLineAsset('${a.id}', ${idx})" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+      <span class="truncate">${esc(a.name)}</span>
+      <span class="text-[11px] text-slate-400 shrink-0 ml-2">${esc(a.departmentAssetCode||a.tag||'no code')}</span>
+    </button>
+  `).join('');
+}
+function filterPrLineAsset(idx){
+  const input = document.getElementById('pr-asset-search-'+idx);
+  const dropdown = document.getElementById('pr-asset-dropdown-'+idx);
+  if(!input || !dropdown) return;
+  dropdown.innerHTML = prLineAssetOptionsHtml(input.value, idx);
+  dropdown.classList.remove('hidden');
+}
+function hidePrLineAssetDropdown(idx){
+  setTimeout(()=>{ const d = document.getElementById('pr-asset-dropdown-'+idx); if(d) d.classList.add('hidden'); }, 150);
+}
+function selectPrLineAsset(assetId, idx){
+  const a = state.assets.find(x=>x.id===assetId);
+  if(!a) return;
+  document.getElementById('pr-asset-search-'+idx).value = prLineItemAssetLabel(a);
+  document.getElementById('pr-asset-id-'+idx).value = assetId;
 }
 function openPurchaseRequisitionForm(id){
   const editing = id ? state.purchaseRequisitions.find(x=>x.id===id) : null;
   const prNumber = editing ? editing.prNumber : '';
   const requester = editing ? editing.requester : (authUser ? authUser.name : '');
+  const lines = editing && editing.lineItems && editing.lineItems.length ? editing.lineItems : [{}];
+  prLineCount = lines.length;
   const body = `
     <div id="pr-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
-    <div class="grid grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">PR Number *</label>
         <input type="text" id="pr-number" value="${esc(prNumber)}" placeholder="e.g. PR-0001" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
@@ -3687,30 +3865,20 @@ function openPurchaseRequisitionForm(id){
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Requester *</label>
         <input type="text" id="pr-requester" value="${esc(requester)}" placeholder="Who is requesting this?" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
-    </div>
-    <div class="mb-4">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item name *</label>
-      <input type="text" id="pr-item-name" value="${editing?esc(editing.itemName||''):''}" placeholder="e.g. Office chairs" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-    </div>
-    <div class="mb-4">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item description</label>
-      <textarea id="pr-item-description" rows="2" placeholder="Specs, model, notes…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.itemDescription||''):''}</textarea>
-    </div>
-    <div class="grid grid-cols-3 gap-4 mb-2">
       <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
-        <input type="number" min="0" step="any" id="pr-qty" value="${editing?editing.quantity:''}" oninput="updatePrTotalCost()" placeholder="0" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Unit cost (MVR) *</label>
-        <input type="number" min="0" step="any" id="pr-unit-cost" value="${editing?editing.unitCost:''}" oninput="updatePrTotalCost()" placeholder="0.00" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Total cost</label>
-        <div id="pr-total-cost" class="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-sm font-semibold text-slate-700 num">${fmtMVR((editing?editing.quantity:0)*(editing?editing.unitCost:0))}</div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
+        <select id="pr-location" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          ${LOCATIONS.map(l=>`<option value="${l.id}" ${(editing?editing.locationId:'')===l.id?'selected':''}>${esc(l.name)} (${esc(l.code)})</option>`).join('')}
+        </select>
       </div>
     </div>
-    <div class="text-[11px] text-slate-400 mb-4">Total cost = Quantity × Unit cost, calculated automatically.</div>
+    <div class="text-xs font-semibold text-slate-600 mb-2">Items</div>
+    <div id="pr-lines">${lines.map((line,idx)=>prLineItemHtml(idx, line)).join('')}</div>
+    <button type="button" onclick="addPrLineItem()" class="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:underline mb-5">+ Add another item</button>
+    <div class="flex justify-end items-center gap-2 mb-5 -mt-2">
+      <span class="text-xs font-semibold text-slate-600">Grand total:</span>
+      <span id="pr-grand-total" class="text-sm font-extrabold text-slate-900 num">${fmtMVR(editing?editing.totalCost:0)}</span>
+    </div>
     <div class="grid grid-cols-2 gap-4 mb-5">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Budget code</label>
@@ -3722,6 +3890,9 @@ function openPurchaseRequisitionForm(id){
           ${PR_STATUSES.map(s=>`<option value="${s.id}" ${(editing?editing.status:'open')===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
         </select>
       </div>
+    </div>
+    <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
+      Setting status to Closed automatically stocks in any line items linked to a stock item above, at the location selected — no separate Stock In entry needed.
     </div>
     <div class="text-xs font-semibold text-slate-600 mb-2">Document links <span class="font-normal text-slate-400">(optional)</span></div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
@@ -3752,15 +3923,37 @@ function openPurchaseRequisitionForm(id){
   `;
   openModal(editing ? 'Edit Purchase Requisition' : 'New Purchase Requisition', body, true);
 }
+function applyPrAutoStockIn(pr){
+  const loc = getLocation(pr.locationId);
+  if(!loc) return;
+  pr.lineItems.forEach(line=>{
+    if(line.linkedProductId && !line.stockedIn){
+      const p = getProduct(line.linkedProductId);
+      if(p){
+        if(!p.stock) p.stock = {};
+        const cur = qtyAt(p, pr.locationId);
+        p.stock[pr.locationId] = cur + line.quantity;
+        const movement = {
+          id: uid(), type:'in', productId: p.id, locationId: pr.locationId, quantity: line.quantity,
+          date: todayStr(), reason: `Auto stock-in from Purchase Requisition ${pr.prNumber}`,
+          acquisition: 'Purchase Order', department:'', staffName:'',
+          createdAt: nowISO(), loggedByName: authUser?authUser.name:null, loggedByEmail: authUser?authUser.email:null,
+        };
+        state.movements.push(movement);
+        persistItemDoc(p);
+        persistMovementDoc(movement);
+        checkLowStockAndNotify(p, pr.locationId);
+        line.stockedIn = true;
+      }
+    }
+  });
+}
 function savePurchaseRequisition(id){
   const errEl = document.getElementById('pr-error');
   errEl.classList.add('hidden');
   const prNumber = document.getElementById('pr-number').value.trim();
   const requester = document.getElementById('pr-requester').value.trim();
-  const itemName = document.getElementById('pr-item-name').value.trim();
-  const itemDescription = document.getElementById('pr-item-description').value.trim();
-  const quantity = Number(document.getElementById('pr-qty').value);
-  const unitCost = Number(document.getElementById('pr-unit-cost').value);
+  const locationId = document.getElementById('pr-location').value;
   const budgetCode = document.getElementById('pr-budget-code').value.trim();
   const status = document.getElementById('pr-status').value;
   const prUrl = document.getElementById('pr-url-pr').value.trim();
@@ -3770,31 +3963,64 @@ function savePurchaseRequisition(id){
 
   if(!prNumber){ errEl.textContent='PR Number is required.'; errEl.classList.remove('hidden'); return; }
   if(!requester){ errEl.textContent='Requester is required.'; errEl.classList.remove('hidden'); return; }
-  if(!itemName){ errEl.textContent='Item name is required.'; errEl.classList.remove('hidden'); return; }
-  if(!quantity || quantity<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
-  if(unitCost==null || isNaN(unitCost) || unitCost<0){ errEl.textContent='Enter a valid unit cost.'; errEl.classList.remove('hidden'); return; }
+  if(!locationId){ errEl.textContent='Location is required.'; errEl.classList.remove('hidden'); return; }
   const dup = state.purchaseRequisitions.find(x=>x.prNumber.toLowerCase()===prNumber.toLowerCase() && x.id!==id);
   if(dup){ errEl.textContent='That PR Number is already used by another requisition.'; errEl.classList.remove('hidden'); return; }
 
-  const totalCost = quantity * unitCost;
+  const lineEls = [...document.querySelectorAll('.pr-line-wrap')];
+  const lineItems = [];
+  for(const lineEl of lineEls){
+    const idx = lineEl.dataset.line;
+    const itemName = document.getElementById('pr-item-name-'+idx).value.trim();
+    const itemDescription = document.getElementById('pr-item-description-'+idx).value.trim();
+    const quantity = Number(document.getElementById('pr-qty-'+idx).value);
+    const unitCost = Number(document.getElementById('pr-unit-cost-'+idx).value);
+    const linkedProductId = document.getElementById('pr-sku-id-'+idx).value || null;
+    const linkedAssetId = document.getElementById('pr-asset-id-'+idx).value || null;
+    if(!itemName){ errEl.textContent='Item name is required for every line.'; errEl.classList.remove('hidden'); return; }
+    if(!quantity || quantity<=0){ errEl.textContent=`Enter a quantity greater than zero for ${itemName}.`; errEl.classList.remove('hidden'); return; }
+    if(unitCost==null || isNaN(unitCost) || unitCost<0){ errEl.textContent=`Enter a valid unit cost for ${itemName}.`; errEl.classList.remove('hidden'); return; }
+    lineItems.push({ itemName, itemDescription, quantity, unitCost, totalCost: quantity*unitCost, linkedProductId, linkedAssetId, stockedIn: wasLineAlreadyStockedIn(id, linkedProductId) });
+  }
+  if(!lineItems.length){ errEl.textContent='Add at least one item.'; errEl.classList.remove('hidden'); return; }
+
+  const totalCost = lineItems.reduce((s,l)=>s+l.totalCost, 0);
   const editing = id ? state.purchaseRequisitions.find(x=>x.id===id) : null;
+  const wasAlreadyClosed = editing ? editing.status === 'closed' : false;
+
   if(editing){
-    Object.assign(editing, { prNumber, requester, itemName, itemDescription, quantity, unitCost, totalCost, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl });
+    Object.assign(editing, { prNumber, requester, locationId, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost });
+    if(status === 'closed' && !wasAlreadyClosed){
+      applyPrAutoStockIn(editing);
+      toast('Purchase requisition closed — linked stock items added to inventory.');
+    } else {
+      toast('Purchase requisition updated.');
+    }
     persistPurchaseRequisitionDoc(editing);
-    toast('Purchase requisition updated.');
   } else {
     const pr = {
-      id: uid(), prNumber, requester, itemName, itemDescription, quantity, unitCost, totalCost, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl,
+      id: uid(), prNumber, requester, locationId, budgetCode, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost,
       createdByName: authUser ? authUser.name : null,
       createdByEmail: authUser ? authUser.email : null,
       createdAt: nowISO(),
     };
     state.purchaseRequisitions.push(pr);
+    if(status === 'closed'){
+      applyPrAutoStockIn(pr);
+      toast('Purchase requisition created and closed — linked stock items added to inventory.');
+    } else {
+      toast('Purchase requisition created.');
+    }
     persistPurchaseRequisitionDoc(pr);
-    toast('Purchase requisition created.');
   }
   closeModal();
   rerenderMain();
+}
+function wasLineAlreadyStockedIn(prId, linkedProductId){
+  if(!prId || !linkedProductId) return false;
+  const pr = state.purchaseRequisitions.find(x=>x.id===prId);
+  if(!pr || !pr.lineItems) return false;
+  return pr.lineItems.some(l => l.linkedProductId === linkedProductId && l.stockedIn);
 }
 function deletePurchaseRequisition(id){
   if(!canManageInventory()){ toast('Only admins can delete purchase requisitions.', true); return; }
@@ -3819,18 +4045,41 @@ function prDocLinksHtml(pr){
   return `<div class="flex flex-wrap gap-1.5 mt-2">${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200">${esc(l.label)} ↗</a>`).join('')}</div>`;
 }
 function prCardHtml(pr){
+  const items = pr.lineItems || [];
+  const loc = getLocation(pr.locationId);
+  const firstItemName = items.length ? items[0].itemName : '';
+  const extraCount = items.length - 1;
   return `
     <div onclick="openPurchaseRequisitionForm('${pr.id}')" class="bg-white rounded-lg border border-slate-200 p-3.5 mb-3 cursor-pointer hover:border-brand-400 hover:shadow-sm transition-colors">
       <div class="flex items-start justify-between gap-2 mb-1.5">
         <span class="text-xs font-bold text-slate-800 num">${esc(pr.prNumber)}</span>
         <span class="text-xs font-semibold text-slate-700 num shrink-0">${fmtMVR(pr.totalCost)}</span>
       </div>
-      <div class="text-sm font-medium text-slate-800 mb-1 truncate" title="${esc(pr.itemName)}">${esc(pr.itemName)}</div>
+      <div class="text-sm font-medium text-slate-800 mb-1 truncate" title="${esc(firstItemName)}">${esc(firstItemName)}${extraCount>0?` <span class="text-slate-400 font-normal">+${extraCount} more</span>`:''}</div>
       <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${pr.budgetCode?(' · '+esc(pr.budgetCode)):''}</div>
-      <div class="text-[11.5px] text-slate-400">Qty ${fmtNum(pr.quantity)} × ${fmtMVR(pr.unitCost)}</div>
+      <div class="text-[11.5px] text-slate-400">${loc?esc(loc.name):'—'} · ${items.length} item${items.length===1?'':'s'}</div>
       ${prDocLinksHtml(pr)}
     </div>
   `;
+}
+function exportPurchaseRequisitionsCSV(){
+  const header = ['PR Number','Requester','Location','Budget Code','Status','Item Name','Item Description','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL'];
+  const rows = [];
+  state.purchaseRequisitions.forEach(pr=>{
+    const loc = getLocation(pr.locationId);
+    (pr.lineItems||[]).forEach(line=>{
+      const linkedProduct = line.linkedProductId ? getProduct(line.linkedProductId) : null;
+      const linkedAsset = line.linkedAssetId ? state.assets.find(a=>a.id===line.linkedAssetId) : null;
+      rows.push([
+        pr.prNumber, pr.requester, loc?loc.name:'', pr.budgetCode||'', prStatusMeta(pr.status).label,
+        line.itemName, line.itemDescription||'', line.quantity, line.unitCost, line.totalCost,
+        linkedProduct?(linkedProduct.sku||''):'', linkedAsset?(linkedAsset.departmentAssetCode||linkedAsset.tag||''):'', line.stockedIn?'Yes':'No',
+        pr.prUrl||'', pr.poUrl||'', pr.doUrl||'', pr.invoiceUrl||'',
+      ]);
+    });
+  });
+  if(rows.length===0){ toast('No purchase requisitions to export.', true); return; }
+  downloadCSV('purchase_requisitions_' + todayStr() + '.csv', header, rows);
 }
 function viewPurchaseRequisitions(){
   const list = [...state.purchaseRequisitions].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
@@ -3841,7 +4090,10 @@ function viewPurchaseRequisitions(){
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Purchase Requisitions</h1>
         <p class="text-sm text-slate-500 mt-0.5">Track purchase requests from request through approval, order, delivery and invoicing.</p>
       </div>
-      <button onclick="openPurchaseRequisitionForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ New Purchase Requisition</button>
+      <div class="flex gap-2.5">
+        <button onclick="exportPurchaseRequisitionsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export CSV</button>
+        <button onclick="openPurchaseRequisitionForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ New Purchase Requisition</button>
+      </div>
     </div>
     <div class="bg-white rounded-xl border border-slate-200 p-4 mb-6 inline-block">
       <div class="text-xs font-medium text-slate-500">Total value across ${list.length} requisition${list.length===1?'':'s'}</div>
@@ -3859,6 +4111,188 @@ function viewPurchaseRequisitions(){
           ${colItems.length ? colItems.map(prCardHtml).join('') : `<div class="text-center py-8 text-[11.5px] text-slate-400">No requisitions here.</div>`}
         </div>`;
       }).join('')}
+    </div>
+  `;
+}
+function openHandoverForm(id){
+  const editing = id ? state.handovers.find(x=>x.id===id) : null;
+  const p = editing ? getProduct(editing.productId) : null;
+  const body = `
+    <div id="ho-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Handover type *</label>
+        <input type="text" id="ho-type" value="${editing?esc(editing.handoverType||''):''}" placeholder="e.g. New issue, Transfer, Return" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Handover date *</label>
+        <input type="date" id="ho-date" value="${editing?esc(editing.handoverDate||''):todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+      <div class="relative">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
+        <input type="text" id="mf-item-search-0" autocomplete="off" placeholder="Search items…" value="${p?esc(p.name):''}"
+          oninput="filterMovementItems(0)" onfocus="this.select(); filterMovementItems(0);" onblur="hideMovementItemDropdown(0)"
+          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <div id="mf-item-dropdown-0" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+        <div id="mf-item-code-0" class="text-[11px] text-slate-400 mt-1"></div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant</label>
+        <select id="mf-variant-0" onchange="selectMovementVariant(0)" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="">Choose an item first…</option>
+        </select>
+        <input type="hidden" id="mf-product-0" value="${editing?esc(editing.productId||''):''}">
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item details</label>
+      <textarea id="ho-item-details" rows="2" placeholder="Condition, serial number, notes…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.itemDetails||''):''}</textarea>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
+      <input type="number" min="0" step="any" id="ho-qty" value="${editing?editing.quantity:''}" placeholder="0" class="w-full sm:w-1/3 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="text-xs font-semibold text-slate-600 mb-2">From</div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+      <div class="relative">
+        <label class="block text-xs text-slate-500 mb-1.5">Department</label>
+        <input type="text" id="ho-from-department" autocomplete="off" value="${editing?esc(editing.fromDepartment||''):'Administration'}" placeholder="Search by name or code…"
+          oninput="filterDepartmentDropdown('ho-from')" onfocus="filterDepartmentDropdown('ho-from')" onblur="hideDepartmentDropdown('ho-from')"
+          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <div id="ho-from-department-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1.5">Staff name</label>
+        <input type="text" id="ho-from-staff" value="${editing?esc(editing.fromStaffName||''):''}" placeholder="Name" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1.5">Designation</label>
+        <input type="text" id="ho-from-designation" value="${editing?esc(editing.fromDesignation||''):''}" placeholder="Job title" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="text-xs font-semibold text-slate-600 mb-2">To</div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+      <div class="relative">
+        <label class="block text-xs text-slate-500 mb-1.5">Department *</label>
+        <input type="text" id="ho-to-department" autocomplete="off" value="${editing?esc(editing.toDepartment||''):''}" placeholder="Search by name or code…"
+          oninput="filterDepartmentDropdown('ho-to')" onfocus="filterDepartmentDropdown('ho-to')" onblur="hideDepartmentDropdown('ho-to')"
+          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <div id="ho-to-department-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1.5">Staff name *</label>
+        <input type="text" id="ho-to-staff" value="${editing?esc(editing.toStaffName||''):''}" placeholder="Name" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1.5">Designation</label>
+        <input type="text" id="ho-to-designation" value="${editing?esc(editing.toDesignation||''):''}" placeholder="Job title" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Handover file URL <span class="font-normal text-slate-400">(optional)</span></label>
+      <input type="url" id="ho-file-url" value="${editing?esc(editing.fileUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+    </div>
+    <div class="flex justify-between items-center gap-2.5">
+      <div>${editing && canManageInventory() ? `<button class="px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50" onclick="deleteHandover('${editing.id}')">Delete</button>` : ''}</div>
+      <div class="flex gap-2.5">
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button>
+        <button class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="saveHandover('${id||''}')">${editing?'Save changes':'Record handover'}</button>
+      </div>
+    </div>
+  `;
+  openModal(editing ? 'Edit Handover' : 'New Handover', body, true);
+  if(editing && p) populateMovementVariants(p.name, 0);
+}
+function saveHandover(id){
+  const errEl = document.getElementById('ho-error');
+  errEl.classList.add('hidden');
+  const handoverType = document.getElementById('ho-type').value.trim();
+  const handoverDate = document.getElementById('ho-date').value;
+  const productId = document.getElementById('mf-product-0').value;
+  const itemDetails = document.getElementById('ho-item-details').value.trim();
+  const quantity = Number(document.getElementById('ho-qty').value);
+  const fromDepartment = document.getElementById('ho-from-department').value.trim();
+  const fromStaffName = document.getElementById('ho-from-staff').value.trim();
+  const fromDesignation = document.getElementById('ho-from-designation').value.trim();
+  const toDepartment = document.getElementById('ho-to-department').value.trim();
+  const toStaffName = document.getElementById('ho-to-staff').value.trim();
+  const toDesignation = document.getElementById('ho-to-designation').value.trim();
+  const fileUrl = document.getElementById('ho-file-url').value.trim();
+  const itemNameTyped = document.getElementById('mf-item-search-0').value.trim();
+
+  if(!handoverType){ errEl.textContent='Handover type is required.'; errEl.classList.remove('hidden'); return; }
+  if(!handoverDate){ errEl.textContent='Handover date is required.'; errEl.classList.remove('hidden'); return; }
+  if(!itemNameTyped){ errEl.textContent='Item is required.'; errEl.classList.remove('hidden'); return; }
+  if(!quantity || quantity<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
+  if(!toDepartment){ errEl.textContent='"To" department is required.'; errEl.classList.remove('hidden'); return; }
+  if(!toStaffName){ errEl.textContent='"To" staff name is required.'; errEl.classList.remove('hidden'); return; }
+
+  const data = { handoverType, handoverDate, productId, itemName: itemNameTyped, itemDetails, quantity, fromDepartment, fromStaffName, fromDesignation, toDepartment, toStaffName, toDesignation, fileUrl };
+  if(id){
+    const editing = state.handovers.find(x=>x.id===id);
+    Object.assign(editing, data);
+    persistHandoverDoc(editing);
+    toast('Handover updated.');
+  } else {
+    const h = Object.assign({ id: uid(), createdByName: authUser?authUser.name:null, createdByEmail: authUser?authUser.email:null, createdAt: nowISO() }, data);
+    state.handovers.push(h);
+    persistHandoverDoc(h);
+    toast('Handover recorded.');
+  }
+  closeModal();
+  rerenderMain();
+}
+function deleteHandover(id){
+  if(!canManageInventory()){ toast('Only admins can delete handover records.', true); return; }
+  const h = state.handovers.find(x=>x.id===id);
+  if(!h) return;
+  confirmAction(`Delete this handover record? This cannot be undone.`, ()=>{
+    state.handovers = state.handovers.filter(x=>x.id!==id);
+    deleteHandoverDoc(id);
+    closeModal();
+    toast('Handover deleted.');
+    rerenderMain();
+  });
+}
+function viewHandovers(){
+  const list = [...state.handovers].sort((a,b)=>(b.handoverDate+b.createdAt||'').localeCompare(a.handoverDate+a.createdAt||''));
+  return `
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Handovers</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Record items handed over between staff and departments.</p>
+      </div>
+      <button onclick="openHandoverForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ New Handover</button>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200">
+      ${list.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold text-right">Qty</th>
+            <th class="py-3 font-semibold">From</th><th class="py-3 font-semibold">To</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
+          </tr></thead>
+          <tbody>${list.map(h=>`
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-5 sm:px-6 py-3 text-slate-500">${fmtDate(h.handoverDate)}</td>
+              <td class="py-3 text-slate-600">${esc(h.handoverType)}</td>
+              <td class="py-3 text-slate-700">${esc(h.itemName)}${h.fileUrl?` <a href="${esc(h.fileUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-[11px] text-brand-600 hover:underline">File ↗</a>`:''}</td>
+              <td class="py-3 text-right num font-medium">${fmtNum(h.quantity)}</td>
+              <td class="py-3 text-slate-500">${esc(h.fromStaffName||'—')}${h.fromDesignation?(' <span class="text-slate-400">· '+esc(h.fromDesignation)+'</span>'):''}<div class="text-[11px] text-slate-400">${esc(h.fromDepartment||'—')}</div></td>
+              <td class="py-3 text-slate-500">${esc(h.toStaffName||'—')}${h.toDesignation?(' <span class="text-slate-400">· '+esc(h.toDesignation)+'</span>'):''}<div class="text-[11px] text-slate-400">${esc(h.toDepartment||'—')}</div></td>
+              <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+                <button onclick="openHandoverForm('${h.id}')" class="text-xs font-semibold text-brand-600 hover:underline">Edit</button>
+              </td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>` : `
+      <div class="text-center py-16 px-6">
+        <h3 class="text-base font-semibold text-slate-800 mb-1">No handovers recorded yet</h3>
+        <p class="text-sm text-slate-500 max-w-sm mx-auto">Log an item handover between staff or departments to start tracking here.</p>
+      </div>`}
     </div>
   `;
 }
