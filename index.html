@@ -188,6 +188,7 @@ const ui = {
   assetsFilter: { search:'', locationId:'', department:'' },
   assetTransactionsFilter: { search:'', locationId:'', dateFrom:'', dateTo:'' },
   prStatusFilter: '',
+  prBudgetOpen: true,
   selectedAssetId: null,
   sidebarOpen: false,
 };
@@ -3735,6 +3736,90 @@ const PR_STATUSES = [
   { id:'closed', label:'Closed', badge:'bg-slate-200 text-slate-600', col:'bg-slate-50 border-slate-200', head:'text-slate-600', ribbon:'bg-slate-500' },
 ];
 function prStatusMeta(id){ return PR_STATUSES.find(s=>s.id===id) || PR_STATUSES[0]; }
+function localDateStr(d){
+  d = d || new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+}
+// Requisitions created before the date field existed fall back to the (local) day they were created.
+function prRequisitionDate(pr){
+  if(pr.requisitionDate) return pr.requisitionDate;
+  const created = pr.createdAt ? new Date(pr.createdAt) : null;
+  return created && !isNaN(created) ? localDateStr(created) : '';
+}
+// Budget code lives on each line; older requisitions may still carry one at the requisition level.
+function prLineBudgetCode(pr, line){
+  return String((line && line.budgetCode) || pr.budgetCode || '').trim();
+}
+function prValueByBudgetCode(list){
+  const groups = new Map();
+  list.forEach(pr=>{
+    (pr.lineItems||[]).forEach(line=>{
+      const code = prLineBudgetCode(pr, line).replace(/\s+/g,' ');
+      const key = code.toLowerCase();
+      let g = groups.get(key);
+      if(!g){ g = { code: code || 'No budget code', unassigned: !code, total:0, lines:0, prIds:new Set() }; groups.set(key, g); }
+      g.total += Number(line.totalCost) || ((Number(line.quantity)||0) * (Number(line.unitCost)||0));
+      g.lines += 1;
+      g.prIds.add(pr.id);
+    });
+  });
+  return [...groups.values()].sort((a,b)=> (a.unassigned - b.unassigned) || (b.total - a.total) || a.code.localeCompare(b.code));
+}
+function prBudgetBreakdownHtml(list){
+  const rows = prValueByBudgetCode(list);
+  const grand = rows.reduce((s,r)=>s+r.total, 0);
+  const scope = ui.prStatusFilter ? (prStatusMeta(ui.prStatusFilter).label + ' requisitions') : 'All requisitions';
+  const open = ui.prBudgetOpen !== false;
+  return `
+    <div class="bg-white rounded-xl border border-slate-200 mb-6">
+      <div role="button" onclick="ui.prBudgetOpen=${open?'false':'true'}; rerenderMain();" class="flex items-center justify-between gap-3 px-5 py-4 cursor-pointer">
+        <div>
+          <div class="text-sm font-bold text-slate-900">Value by budget code</div>
+          <div class="text-xs text-slate-500">${esc(scope)} · ${rows.length} budget code${rows.length===1?'':'s'}</div>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="text-right">
+            <div class="text-[11px] text-slate-500">Total</div>
+            <div class="text-sm font-extrabold text-slate-900 num">${fmtMVR(grand)}</div>
+          </div>
+          <span class="text-xs font-semibold text-brand-600 w-9 text-right">${open?'Hide':'Show'}</span>
+        </div>
+      </div>
+      ${open ? `
+      <div class="border-t border-slate-100 overflow-auto max-h-80">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 bg-white"><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <th class="px-5 py-2.5 font-semibold">Budget code</th>
+            <th class="py-2.5 px-3 font-semibold text-right">Requisitions</th>
+            <th class="py-2.5 px-3 font-semibold text-right">Items</th>
+            <th class="py-2.5 px-3 font-semibold text-right">Value</th>
+            <th class="py-2.5 pr-5 pl-4 font-semibold w-44">Share</th>
+          </tr></thead>
+          <tbody>
+            ${rows.length ? rows.map(r=>{
+              const pct = grand>0 ? (r.total/grand*100) : 0;
+              const pctLabel = pct>0 && pct<1 ? '<1%' : Math.round(pct)+'%';
+              return `
+              <tr class="border-b border-slate-100 last:border-0">
+                <td class="px-5 py-2.5 ${r.unassigned?'text-slate-400 italic':'text-slate-700'}">${esc(r.code)}</td>
+                <td class="py-2.5 px-3 text-right num text-slate-500">${r.prIds.size}</td>
+                <td class="py-2.5 px-3 text-right num text-slate-500">${r.lines}</td>
+                <td class="py-2.5 px-3 text-right num font-semibold text-slate-800 whitespace-nowrap">${fmtMVR(r.total)}</td>
+                <td class="py-2.5 pr-5 pl-4">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div class="h-1.5 rounded-full bg-brand-500" style="width:${pct.toFixed(1)}%"></div></div>
+                    <span class="text-[11px] text-slate-500 num w-9 text-right">${pctLabel}</span>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('') : `<tr><td colspan="5" class="px-5 py-8 text-center text-sm text-slate-400">No requisitions to summarize.</td></tr>`}
+          </tbody>
+        </table>
+      </div>` : ''}
+    </div>
+  `;
+}
 let prLineCount = 1;
 function prLineItemSkuLabel(p){ return p ? (displayName(p) + (p.sku?(' ('+p.sku+')'):'')) : ''; }
 function prLineItemAssetLabel(a){ return a ? (a.name + (a.departmentAssetCode?(' ('+a.departmentAssetCode+')'):(a.tag?(' ('+a.tag+')'):''))) : ''; }
@@ -3886,14 +3971,21 @@ function openPurchaseRequisitionForm(id){
   const editing = id ? state.purchaseRequisitions.find(x=>x.id===id) : null;
   const prNumber = editing ? editing.prNumber : '';
   const requester = editing ? editing.requester : (authUser ? authUser.name : '');
-  const lines = editing && editing.lineItems && editing.lineItems.length ? editing.lineItems : [{}];
+  const lines = editing && editing.lineItems && editing.lineItems.length
+    ? editing.lineItems.map(l=>Object.assign({}, l, { budgetCode: prLineBudgetCode(editing, l) }))
+    : [{}];
+  const requisitionDate = editing ? prRequisitionDate(editing) : localDateStr();
   prLineCount = lines.length;
   const body = `
     <div id="pr-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">PR Number *</label>
         <input type="text" id="pr-number" value="${esc(prNumber)}" placeholder="e.g. PR-0001" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Requisition date *</label>
+        <input type="date" id="pr-date" value="${esc(requisitionDate)}" max="${localDateStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Requester *</label>
@@ -3987,6 +4079,7 @@ function savePurchaseRequisition(id){
   const errEl = document.getElementById('pr-error');
   errEl.classList.add('hidden');
   const prNumber = document.getElementById('pr-number').value.trim();
+  const requisitionDate = document.getElementById('pr-date').value;
   const requester = document.getElementById('pr-requester').value.trim();
   const locationId = document.getElementById('pr-location').value;
   const status = document.getElementById('pr-status').value;
@@ -3996,6 +4089,7 @@ function savePurchaseRequisition(id){
   const invoiceUrl = document.getElementById('pr-url-invoice').value.trim();
 
   if(!prNumber){ errEl.textContent='PR Number is required.'; errEl.classList.remove('hidden'); return; }
+  if(!requisitionDate){ errEl.textContent='Requisition date is required.'; errEl.classList.remove('hidden'); return; }
   if(!requester){ errEl.textContent='Requester is required.'; errEl.classList.remove('hidden'); return; }
   if(!locationId){ errEl.textContent='Location is required.'; errEl.classList.remove('hidden'); return; }
   const dup = state.purchaseRequisitions.find(x=>x.prNumber.toLowerCase()===prNumber.toLowerCase() && x.id!==id);
@@ -4024,7 +4118,7 @@ function savePurchaseRequisition(id){
   const wasAlreadyClosed = editing ? editing.status === 'closed' : false;
 
   if(editing){
-    Object.assign(editing, { prNumber, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost });
+    Object.assign(editing, { prNumber, requisitionDate, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost });
     if(status === 'closed' && !wasAlreadyClosed){
       applyPrAutoStockIn(editing);
       toast('Purchase requisition closed — linked stock items added to inventory.');
@@ -4034,7 +4128,7 @@ function savePurchaseRequisition(id){
     persistPurchaseRequisitionDoc(editing);
   } else {
     const pr = {
-      id: uid(), prNumber, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost,
+      id: uid(), prNumber, requisitionDate, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost,
       createdByName: authUser ? authUser.name : null,
       createdByEmail: authUser ? authUser.email : null,
       createdAt: nowISO(),
@@ -4079,8 +4173,8 @@ function prDocLinksHtml(pr){
   if(!links.length) return '';
   return `<div class="flex flex-wrap gap-1.5 mt-2">${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200">${esc(l.label)} ↗</a>`).join('')}</div>`;
 }
-function prCardBudgetCodeSummary(items){
-  const codes = [...new Set(items.map(l=>l.budgetCode).filter(Boolean))];
+function prCardBudgetCodeSummary(pr){
+  const codes = [...new Set((pr.lineItems||[]).map(l=>prLineBudgetCode(pr, l)).filter(Boolean))];
   if(!codes.length) return '';
   if(codes.length===1) return ' · ' + esc(codes[0]);
   return ' · ' + codes.length + ' budget codes';
@@ -4099,14 +4193,17 @@ function prCardHtml(pr){
         <div class="text-sm font-medium text-slate-800 truncate" title="${esc(firstItemName)}">${esc(firstItemName)}${extraCount>0?` <span class="text-slate-400 font-normal">+${extraCount} more</span>`:''}</div>
         <span class="text-xs font-semibold text-slate-700 num shrink-0">${fmtMVR(pr.totalCost)}</span>
       </div>
-      <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${prCardBudgetCodeSummary(items)}</div>
-      <div class="text-[11.5px] text-slate-400">${loc?esc(loc.name):'—'} · ${items.length} item${items.length===1?'':'s'}</div>
+      <div class="text-[11.5px] text-slate-500">${esc(pr.requester)}${prCardBudgetCodeSummary(pr)}</div>
+      <div class="flex items-center justify-between gap-2 text-[11.5px] text-slate-400">
+        <span class="truncate">${loc?esc(loc.name):'—'} · ${items.length} item${items.length===1?'':'s'}</span>
+        <span class="shrink-0 whitespace-nowrap">${fmtDate(prRequisitionDate(pr))}</span>
+      </div>
       ${prDocLinksHtml(pr)}
     </div>
   `;
 }
 function exportPurchaseRequisitionsCSV(){
-  const header = ['PR Number','Requester','Location','Status','Item Name','Item Description','Budget Code','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL'];
+  const header = ['PR Number','Requisition Date','Requester','Location','Status','Item Name','Item Description','Budget Code','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL'];
   const rows = [];
   state.purchaseRequisitions.forEach(pr=>{
     const loc = getLocation(pr.locationId);
@@ -4114,8 +4211,8 @@ function exportPurchaseRequisitionsCSV(){
       const linkedProduct = line.linkedProductId ? getProduct(line.linkedProductId) : null;
       const linkedAsset = line.linkedAssetId ? state.assets.find(a=>a.id===line.linkedAssetId) : null;
       rows.push([
-        pr.prNumber, pr.requester, loc?loc.name:'', prStatusMeta(pr.status).label,
-        line.itemName, line.itemDescription||'', line.budgetCode||'', line.quantity, line.unitCost, line.totalCost,
+        pr.prNumber, prRequisitionDate(pr), pr.requester, loc?loc.name:'', prStatusMeta(pr.status).label,
+        line.itemName, line.itemDescription||'', prLineBudgetCode(pr, line), line.quantity, line.unitCost, line.totalCost,
         linkedProduct?(linkedProduct.sku||''):'', linkedAsset?(linkedAsset.departmentAssetCode||linkedAsset.tag||''):'', line.stockedIn?'Yes':'No',
         pr.prUrl||'', pr.poUrl||'', pr.doUrl||'', pr.invoiceUrl||'',
       ]);
@@ -4125,7 +4222,7 @@ function exportPurchaseRequisitionsCSV(){
   downloadCSV('purchase_requisitions_' + todayStr() + '.csv', header, rows);
 }
 function viewPurchaseRequisitions(){
-  const all = [...state.purchaseRequisitions].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  const all = [...state.purchaseRequisitions].sort((a,b)=> prRequisitionDate(b).localeCompare(prRequisitionDate(a)) || (b.createdAt||'').localeCompare(a.createdAt||''));
   const totalValue = all.reduce((s,pr)=>s+(pr.totalCost||0), 0);
   const list = ui.prStatusFilter ? all.filter(pr=>pr.status===ui.prStatusFilter) : all;
   return `
@@ -4151,6 +4248,7 @@ function viewPurchaseRequisitions(){
         return `<button onclick="ui.prStatusFilter='${s.id}'; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${active?(s.ribbon+' border-transparent text-white'):'border-slate-300 text-slate-600 hover:bg-slate-50'}">${esc(s.label)} <span class="opacity-75">${count}</span></button>`;
       }).join('')}
     </div>
+    ${prBudgetBreakdownHtml(list)}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       ${list.length ? list.map(prCardHtml).join('') : `<div class="col-span-full text-center py-16 text-sm text-slate-400">${ui.prStatusFilter ? 'No requisitions with this status.' : 'No purchase requisitions yet — create one to get started.'}</div>`}
     </div>
