@@ -3863,7 +3863,14 @@ function openPurchaseRequisitionForm(id){
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Requester *</label>
+        ${state.profiles.length ? `
+        <select id="pr-requester" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
+          <option value="">Select a user…</option>
+          ${state.profiles.map(pr=>`<option value="${esc(pr.name||pr.email)}" ${requester===(pr.name||pr.email)?'selected':''}>${esc(pr.name||pr.email)}${pr.email?(' — '+esc(pr.email)):''}</option>`).join('')}
+        </select>
+        ` : `
         <input type="text" id="pr-requester" value="${esc(requester)}" placeholder="Who is requesting this?" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        `}
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Location *</label>
