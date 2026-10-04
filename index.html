@@ -49,21 +49,39 @@
   /* Purchase requisitions: one long banner per requisition.
      Layout follows the width of the list itself (container query), not the screen:
      wide = a single row, medium = three short rows, narrow = a simple stack. */
-  /* Page header and filter row: side by side when there's room, a tidy stack when there isn't */
+  /* Purchase requisitions: the top area (title, buttons, filters, sort) stays pinned while the list scrolls.
+     Kept slim: one row for title + buttons, one row for filters + sort. The negative margins make the pinned
+     strip run edge to edge across the page's side padding, and the offsets match the layout of the app:
+     a fixed 3.5rem top bar below desktop width, none on desktop. Not pinned on phones or very short windows. */
   .pr-page{ container: prpage / inline-size; }
-  .pr-head{ display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+  .pr-top{ position: sticky; top: 3.5rem; z-index: 20; margin: -1rem -1rem 1.25rem; padding: 1rem 1rem .875rem;
+           background: #f1f5f9; border-bottom: 1px solid #e2e8f0; }
+  @media (min-width: 640px){ .pr-top{ margin-left: -1.5rem; margin-right: -1.5rem; padding-left: 1.5rem; padding-right: 1.5rem; } }
+  @media (min-width: 1024px){ .pr-top{ top: 0; margin-left: -2.5rem; margin-right: -2.5rem; padding-left: 2.5rem; padding-right: 2.5rem; } }
+  @media (max-width: 639px), (max-height: 599px){ .pr-top{ position: static; } }
+  html[data-theme="dark"] .pr-top{ background: #0f172a; border-bottom-color: #1e293b; }
+  .pr-head{ display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: .875rem; }
   .pr-head-text{ flex: 1 1 0; min-width: 0; }
   .pr-head-actions{ display: flex; gap: .625rem; flex-shrink: 0; }
-  .pr-toolbar{ display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+  .pr-toolbar{ display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
   .pr-pills{ display: flex; flex-wrap: wrap; gap: .5rem; flex: 1 1 0; min-width: 0; }
   .pr-sort{ display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
   @container prpage (max-width: 740px){
-    .pr-head{ flex-direction: column; gap: .875rem; }
+    .pr-head{ align-items: center; }
+    .pr-head-text p{ display: none; }
+    .pr-head-text h1{ font-size: 1.25rem; line-height: 1.75rem; }
+    .pr-head-actions{ gap: .5rem; }
+    .pr-head-actions > button{ padding: .5rem .75rem; font-size: .8125rem; }
+    .pr-pills{ flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .pr-pills::-webkit-scrollbar{ display: none; }
+    .pr-pills > button{ flex-shrink: 0; white-space: nowrap; }
+    .pr-sort-label{ display: none; }
+    .pr-toolbar{ gap: .75rem; }
+  }
+  @container prpage (max-width: 560px){
+    .pr-head{ flex-direction: column; align-items: stretch; gap: .625rem; }
     .pr-head-actions{ width: 100%; }
     .pr-head-actions > button{ flex: 1 1 0; justify-content: center; }
-    .pr-toolbar{ flex-direction: column; align-items: stretch; gap: .75rem; }
-    .pr-sort{ width: 100%; }
-    .pr-sort select{ flex: 1 1 0; min-width: 0; }
   }
   @container prpage (max-width: 460px){
     .pr-head-actions{ flex-direction: column-reverse; }   /* primary action first, one per row */
@@ -4502,6 +4520,7 @@ function viewPurchaseRequisitions(){
   const list = ui.prStatusFilter ? all.filter(pr=>pr.status===ui.prStatusFilter) : all;
   return `
     <div class="pr-page">
+    <div class="pr-top">
     <div class="pr-head">
       <div class="pr-head-text">
         <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Purchase Requisitions</h1>
@@ -4521,11 +4540,12 @@ function viewPurchaseRequisitions(){
         return `<button onclick="ui.prStatusFilter='${s.id}'; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${active?(s.ribbon+' '+s.ribbonText+' border-transparent'):'border-slate-300 text-slate-600 hover:bg-slate-50'}">${esc(s.label)} <span class="opacity-75">${count}</span></button>`;
       }).join('')}
       </div>
-      <label class="pr-sort text-xs font-semibold text-slate-600">Sort
-        <select id="pr-sort" onchange="setPrSort(this.value)" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium bg-white">
+      <label class="pr-sort text-xs font-semibold text-slate-600"><span class="pr-sort-label">Sort</span>
+        <select id="pr-sort" aria-label="Sort requisitions" onchange="setPrSort(this.value)" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium bg-white">
           ${PR_SORTS.map(s=>`<option value="${s.id}" ${currentPrSort()===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
         </select>
       </label>
+    </div>
     </div>
     ${prBudgetBreakdownHtml(list)}
     <div class="pr-list">
