@@ -58,13 +58,39 @@
   html[data-theme="dark"] .text-slate-900{ color: #f1f5f9; }
   html[data-theme="dark"] .text-slate-800{ color: #e2e8f0; }
   html[data-theme="dark"] .text-slate-700{ color: #cbd5e1; }
-  html[data-theme="dark"] .text-slate-600{ color: #94a3b8; }
-  html[data-theme="dark"] .text-slate-500{ color: #94a3b8; }
-  html[data-theme="dark"] .text-slate-400{ color: #64748b; }
+  html[data-theme="dark"] .text-slate-600{ color: #b4c0d3; }
+  html[data-theme="dark"] .text-slate-500{ color: #a3b1c6; }
+  html[data-theme="dark"] .text-slate-400{ color: #8394ad; }
   html[data-theme="dark"] input, html[data-theme="dark"] select, html[data-theme="dark"] textarea{ background-color: #0f172a; color: #e2e8f0; }
-  html[data-theme="dark"] input::placeholder, html[data-theme="dark"] textarea::placeholder{ color: #64748b; }
+  html[data-theme="dark"] input::placeholder, html[data-theme="dark"] textarea::placeholder{ color: #7c8ba3; }
   html[data-theme="dark"] .hover\:bg-slate-50:hover{ background-color: #273449; }
   html[data-theme="dark"] .hover\:bg-slate-100:hover{ background-color: #334155; }
+
+  /* Dark-mode readability: colours that were tuned for white backgrounds */
+  html[data-theme="dark"] .text-brand-600{ color: #a5b4fc; }
+  html[data-theme="dark"] .text-brand-700, html[data-theme="dark"] .text-brand-800{ color: #c7d2fe; }
+  html[data-theme="dark"] .text-rose-600{ color: #fb7185; }
+  html[data-theme="dark"] .text-rose-700{ color: #fda4af; }
+  html[data-theme="dark"] .text-emerald-600{ color: #34d399; }
+  html[data-theme="dark"] .text-emerald-700{ color: #6ee7b7; }
+  html[data-theme="dark"] .text-amber-700{ color: #fcd34d; }
+  html[data-theme="dark"] .text-amber-800{ color: #fde68a; }
+  /* tinted boxes/pills become dark translucent tints so their (now light) text stays readable */
+  html[data-theme="dark"] .bg-slate-200{ background-color: #334155; }
+  html[data-theme="dark"] .bg-slate-50\/50{ background-color: rgba(148,163,184,.07); }
+  html[data-theme="dark"] .bg-rose-50{ background-color: rgba(244,63,94,.12); }
+  html[data-theme="dark"] .bg-rose-100{ background-color: rgba(244,63,94,.18); }
+  html[data-theme="dark"] .bg-amber-50{ background-color: rgba(245,158,11,.12); }
+  html[data-theme="dark"] .bg-amber-100{ background-color: rgba(245,158,11,.18); }
+  html[data-theme="dark"] .bg-emerald-100{ background-color: rgba(16,185,129,.18); }
+  html[data-theme="dark"] .bg-brand-50{ background-color: rgba(99,102,241,.15); }
+  /* hover states that would otherwise turn dark-on-dark or flash a light background */
+  html[data-theme="dark"] .hover\:text-slate-600:hover{ color: #e2e8f0; }
+  html[data-theme="dark"] .hover\:text-slate-700:hover{ color: #f1f5f9; }
+  html[data-theme="dark"] .hover\:text-rose-600:hover{ color: #fb7185; }
+  html[data-theme="dark"] .hover\:text-brand-600:hover{ color: #c7d2fe; }
+  html[data-theme="dark"] .hover\:bg-slate-200:hover{ background-color: #3d4c63; }
+  html[data-theme="dark"] .hover\:bg-rose-50:hover{ background-color: rgba(244,63,94,.15); }
   html[data-theme="dark"] .sticky-toolbar{ background-color: #0f172a; }
   html[data-theme="dark"] .sticky-toolbar.sticky-toolbar-card{ background-color: #1e293b; }
   html[data-theme="dark"] .sticky-thead th{ background-color: #1e293b; box-shadow: 0 1px 0 0 #334155; }
@@ -3730,11 +3756,36 @@ function clearAssetTxFilters(){
   rerenderMain();
 }
 const PR_STATUSES = [
-  { id:'open', label:'Open', badge:'bg-blue-100 text-blue-700', col:'bg-blue-50/50 border-blue-200', head:'text-blue-700', ribbon:'bg-blue-600' },
-  { id:'pending_approval', label:'Pending Approval', badge:'bg-amber-100 text-amber-700', col:'bg-amber-50/50 border-amber-200', head:'text-amber-700', ribbon:'bg-amber-500' },
-  { id:'released', label:'Released', badge:'bg-emerald-100 text-emerald-700', col:'bg-emerald-50/50 border-emerald-200', head:'text-emerald-700', ribbon:'bg-emerald-600' },
-  { id:'closed', label:'Closed', badge:'bg-slate-200 text-slate-600', col:'bg-slate-50 border-slate-200', head:'text-slate-600', ribbon:'bg-slate-500' },
+  { id:'open', label:'Open', badge:'bg-blue-100 text-blue-700', col:'bg-blue-50/50 border-blue-200', head:'text-blue-700', ribbon:'bg-blue-600', ribbonText:'text-white' },
+  { id:'pending_approval', label:'Pending Approval', badge:'bg-amber-100 text-amber-700', col:'bg-amber-50/50 border-amber-200', head:'text-amber-700', ribbon:'bg-amber-500', ribbonText:'text-[#451a03]' },
+  { id:'released', label:'Released', badge:'bg-emerald-100 text-emerald-700', col:'bg-emerald-50/50 border-emerald-200', head:'text-emerald-700', ribbon:'bg-emerald-700', ribbonText:'text-white' },
+  { id:'closed', label:'Closed', badge:'bg-slate-200 text-slate-600', col:'bg-slate-50 border-slate-200', head:'text-slate-600', ribbon:'bg-slate-500', ribbonText:'text-white' },
 ];
+const PR_BUDGET_CODES = [
+  'Staff Accomodation',
+  'IP - Building',
+  'Vehicles',
+  'Printing & Office Supplies',
+  'Furniture & Fittings',
+  'Office Equipment',
+  'Local Travel',
+  'PPE Repair and Maintenance',
+  'Office Refreshments',
+  'Office Supplies',
+  'Small Tools & Equipment',
+  'Staff Attire',
+  'PPE Insurance',
+  'Foreign Travel',
+  'Safety Expenses',
+];
+// A value that isn't in the list (e.g. on an older requisition) stays selectable, so editing never silently drops it.
+function prBudgetCodeOptionsHtml(current){
+  const cur = String(current||'').trim();
+  const canonical = PR_BUDGET_CODES.find(c => c.toLowerCase() === cur.toLowerCase());
+  const extra = cur && !canonical ? `<option value="${esc(cur)}" selected>${esc(cur)} (not in list)</option>` : '';
+  return `<option value="">Select budget code…</option>` + extra
+    + PR_BUDGET_CODES.map(c=>`<option value="${esc(c)}" ${c===canonical?'selected':''}>${esc(c)}</option>`).join('');
+}
 function prStatusMeta(id){ return PR_STATUSES.find(s=>s.id===id) || PR_STATUSES[0]; }
 function localDateStr(d){
   d = d || new Date();
@@ -3843,7 +3894,7 @@ function prLineItemHtml(idx, line){
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">Budget code</label>
-          <input type="text" id="pr-budget-code-${idx}" value="${esc(line.budgetCode||'')}" placeholder="e.g. BC-2026-014" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+          <select id="pr-budget-code-${idx}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${prBudgetCodeOptionsHtml(line.budgetCode)}</select>
         </div>
       </div>
       <div class="grid grid-cols-3 gap-3 mb-3">
@@ -4187,7 +4238,7 @@ function prCardHtml(pr){
   const s = prStatusMeta(pr.status);
   return `
     <div onclick="openPurchaseRequisitionForm('${pr.id}')" class="relative bg-white rounded-lg border border-slate-200 p-3.5 pr-16 cursor-pointer hover:border-brand-400 hover:shadow-sm transition-colors overflow-hidden">
-      <div class="absolute top-[13px] right-[-34px] w-[140px] text-center text-[10px] font-bold uppercase tracking-wide py-1 rotate-45 ${s.ribbon} text-white shadow-sm">${esc(s.label)}</div>
+      <div class="absolute top-[13px] right-[-34px] w-[140px] text-center text-[10px] font-bold uppercase tracking-wide py-1 rotate-45 ${s.ribbon} ${s.ribbonText} shadow-sm">${esc(s.label)}</div>
       <div class="text-xs font-bold text-slate-800 num whitespace-nowrap mb-1.5">${esc(pr.prNumber)}</div>
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="text-sm font-medium text-slate-800 truncate" title="${esc(firstItemName)}">${esc(firstItemName)}${extraCount>0?` <span class="text-slate-400 font-normal">+${extraCount} more</span>`:''}</div>
@@ -4245,7 +4296,7 @@ function viewPurchaseRequisitions(){
       ${PR_STATUSES.map(s=>{
         const count = all.filter(pr=>pr.status===s.id).length;
         const active = ui.prStatusFilter===s.id;
-        return `<button onclick="ui.prStatusFilter='${s.id}'; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${active?(s.ribbon+' border-transparent text-white'):'border-slate-300 text-slate-600 hover:bg-slate-50'}">${esc(s.label)} <span class="opacity-75">${count}</span></button>`;
+        return `<button onclick="ui.prStatusFilter='${s.id}'; rerenderMain();" class="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-colors ${active?(s.ribbon+' '+s.ribbonText+' border-transparent'):'border-slate-300 text-slate-600 hover:bg-slate-50'}">${esc(s.label)} <span class="opacity-75">${count}</span></button>`;
       }).join('')}
     </div>
     ${prBudgetBreakdownHtml(list)}
