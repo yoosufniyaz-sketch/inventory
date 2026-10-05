@@ -117,6 +117,20 @@
     .pr-ribbon{ top: 16px; right: -38px; width: 130px; font-size: 9px; }
   }
 
+  /* Handover form: each item is a card; the Variant column only appears for catalog items */
+  .ho-line-grid{ display: grid; grid-template-columns: minmax(0,1fr) 6rem 1.75rem; gap: .75rem; align-items: end; }
+  .ho-line-wrap.has-variant .ho-line-grid{ grid-template-columns: minmax(0,1fr) 11rem 6rem 1.75rem; }
+  .ho-line-wrap:not(.has-variant) .ho-variant{ display: none; }
+  .ho-line-row2{ display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: .75rem; margin-top: .75rem; }
+  .ho-remove{ height: 2.625rem; }
+  .ho-item-line{ max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 639px){
+    .ho-line-grid, .ho-line-wrap.has-variant .ho-line-grid{ grid-template-columns: minmax(0,1fr) 5rem 1.75rem; }
+    .ho-line-grid .ho-item{ grid-column: 1; grid-row: 1; } .ho-line-grid .ho-qty{ grid-column: 2; grid-row: 1; } .ho-line-grid .ho-remove{ grid-column: 3; grid-row: 1; }
+    .ho-line-wrap.has-variant .ho-variant{ grid-column: 1 / -1; grid-row: 2; }
+    .ho-line-row2{ grid-template-columns: 1fr; }
+  }
+
   /* ---------- Dark mode ---------- */
   html[data-theme="dark"]{ color-scheme: dark; }
   html[data-theme="dark"] body.bg-slate-100{ background-color: #0f172a; }
@@ -1427,17 +1441,46 @@ function toggleSidebar(open){
 /* =====================================================================
    MODAL & CONFIRM
 ===================================================================== */
+// While a form has a pinned header, keep that much clear at the top when the browser scrolls to a field
+// (otherwise a field that is only partly visible can sit hidden underneath the header).
+let modalHeadObserver = null;
+function syncModalScrollPadding(){
+  const overlay = document.getElementById('modal-overlay');
+  if(!overlay) return;
+  const head = overlay.querySelector('.pr-sticky-head');
+  overlay.style.scrollPaddingTop = (head && getComputedStyle(head).position === 'sticky') ? (head.offsetHeight + 12) + 'px' : '';
+}
+function watchModalStickyHead(){
+  syncModalScrollPadding();
+  const head = document.querySelector('#modal-overlay .pr-sticky-head');
+  if(head && window.ResizeObserver){ modalHeadObserver = new ResizeObserver(syncModalScrollPadding); modalHeadObserver.observe(head); }
+}
+function stopModalScrollPadding(){
+  if(modalHeadObserver){ modalHeadObserver.disconnect(); modalHeadObserver = null; }
+  const overlay = document.getElementById('modal-overlay');
+  if(overlay) overlay.style.scrollPaddingTop = '';
+}
+window.addEventListener('resize', syncModalScrollPadding);
+
 function openModal(title, bodyHtml, wide){
-  document.getElementById('modal-title').textContent = title;
+  const overlay = document.getElementById('modal-overlay');
+  const titleEl = document.getElementById('modal-title');
+  // A dialog opened from scratch, or one replacing a different dialog, always starts at the top.
+  // (Re-rendering the same dialog in place keeps its position.)
+  const sameDialog = !overlay.classList.contains('hidden') && titleEl.textContent === title;
+  stopModalScrollPadding();
+  titleEl.textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHtml;
   document.getElementById('modal-box').classList.toggle('max-w-lg', !wide);
   document.getElementById('modal-box').classList.toggle('max-w-2xl', !!wide);
-  const overlay = document.getElementById('modal-overlay');
   overlay.classList.remove('hidden');
   overlay.classList.add('flex');
+  if(!sameDialog) overlay.scrollTop = 0;
 }
 function closeModal(){
   const overlay = document.getElementById('modal-overlay');
+  overlay.scrollTop = 0;            // the next dialog must not inherit this one's scroll position
+  stopModalScrollPadding();
   overlay.classList.add('hidden');
   overlay.classList.remove('flex');
   document.getElementById('modal-body').innerHTML = '';
@@ -4333,6 +4376,7 @@ function openPurchaseRequisitionForm(id){
     </div>
   `;
   openModal(editing ? 'Edit Purchase Requisition' : 'New Purchase Requisition', body, true);
+  watchModalStickyHead();
 }
 function applyPrAutoStockIn(pr){
   const loc = getLocation(pr.locationId);
@@ -4554,62 +4598,215 @@ function viewPurchaseRequisitions(){
     </div>
   `;
 }
+/* ---------- Handover form: several items, each picked from the catalog or typed in by hand ---------- */
+let hoLineCount = 1;
+// Records made before items became a list keep their single item in the top-level fields.
+function hoLines(h){
+  if(Array.isArray(h.lineItems) && h.lineItems.length) return h.lineItems;
+  if(h.itemName || h.productId) return [{ itemName:h.itemName||'', productId:h.productId||'', quantity:h.quantity||0, itemDetails:h.itemDetails||'', assetCode:'', assetId:null }];
+  return [];
+}
+function hoAssetLabel(a){ return a ? (a.departmentAssetCode || a.tag || '') : ''; }
+function hoLineHtml(idx, line){
+  line = line || {};
+  const p = line.productId ? getProduct(line.productId) : null;           // a catalog item that still exists
+  const linkedAsset = line.assetId ? state.assets.find(x=>x.id===line.assetId) : null;
+  const itemText = p ? p.name : (line.itemName || '');
+  const variants = p ? state.products.filter(x=>x.name===p.name).sort(byDisplayName) : [];
+  const fieldCls = 'w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
+  return `
+    <div class="ho-line-wrap border border-slate-200 rounded-lg p-3.5 mb-3 bg-slate-50/50 ${p?'has-variant':''}" data-line="${idx}">
+      <div class="ho-line-grid">
+        <div class="relative ho-item">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
+          <input type="text" id="ho-item-${idx}" autocomplete="off" value="${esc(itemText)}" placeholder="Search the catalog, or type an item in"
+            oninput="hoItemTyped(${idx})" onfocus="this.select(); hoFilterItems(${idx});" onblur="hoHideItemDropdown(${idx})" class="${fieldCls}">
+          <div id="ho-item-dropdown-${idx}" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+          <input type="hidden" id="ho-product-${idx}" value="${p?esc(p.id):''}">
+        </div>
+        <div class="ho-variant">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant</label>
+          <select id="ho-variant-${idx}" onchange="hoSelectVariant(${idx})" class="${fieldCls}">
+            ${variants.map(v=>`<option value="${esc(v.id)}" ${v.id===p.id?'selected':''}>${esc(v.variant&&v.variant.trim()?v.variant.trim():'Standard')}</option>`).join('')}
+          </select>
+        </div>
+        <div class="ho-qty">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
+          <input type="number" min="0" step="any" id="ho-qty-${idx}" value="${line.quantity||''}" placeholder="0" class="${fieldCls}">
+        </div>
+        <button type="button" onclick="removeHandoverLine(${idx})" class="ho-remove text-slate-400 hover:text-rose-600 ${idx===0?'invisible':''}" title="Remove this item">✕</button>
+      </div>
+      <div id="ho-item-hint-${idx}" class="text-[11px] text-slate-400 mt-1"></div>
+      <div class="ho-line-row2">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item details <span class="font-normal text-slate-400">(optional)</span></label>
+          <input type="text" id="ho-details-${idx}" value="${esc(line.itemDetails||'')}" placeholder="Condition, serial number, notes…" class="${fieldCls}">
+        </div>
+        <div class="relative">
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Asset code <span class="font-normal text-slate-400">(optional)</span></label>
+          <input type="text" id="ho-asset-${idx}" autocomplete="off" value="${esc(line.assetCode||'')}" placeholder="Pick an asset, or type a code"
+            oninput="hoAssetTyped(${idx})" onfocus="hoFilterAssets(${idx})" onblur="hoHideAssetDropdown(${idx})" class="${fieldCls}">
+          <input type="hidden" id="ho-asset-id-${idx}" value="${linkedAsset?esc(linkedAsset.id):''}">
+          <div id="ho-asset-dropdown-${idx}" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
+          <div id="ho-asset-hint-${idx}" class="text-[11px] text-slate-400 mt-1"></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function hoRefreshItemHint(idx){
+  const hint = document.getElementById('ho-item-hint-'+idx);
+  if(!hint) return;
+  const text = document.getElementById('ho-item-'+idx).value.trim();
+  const pid = document.getElementById('ho-product-'+idx).value;
+  const p = pid ? getProduct(pid) : null;
+  hint.textContent = p ? ('Catalog item' + (p.sku ? ' · ' + p.sku : '')) : (text ? 'Manual entry — not linked to the item catalog' : '');
+}
+function hoRefreshAssetHint(idx){
+  const hint = document.getElementById('ho-asset-hint-'+idx);
+  if(!hint) return;
+  const aid = document.getElementById('ho-asset-id-'+idx).value;
+  const a = aid ? state.assets.find(x=>x.id===aid) : null;
+  hint.textContent = a ? ('Linked asset · ' + a.name) : '';
+}
+function hoItemOptionsHtml(filterText, idx){
+  const f = (filterText||'').trim().toLowerCase();
+  const names = getUniqueItemNames().filter(n=> !f || n.toLowerCase().includes(f));
+  if(!names.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">Not in the catalog — keep typing and it will be saved as a manual entry.</div>`;
+  return names.map(n=>{
+    const count = state.products.filter(p=>p.name===n).length;
+    return `
+    <button type="button" data-name="${esc(n)}" onmousedown="event.preventDefault(); hoSelectItemName(this.dataset.name, ${idx})" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+      <span class="truncate">${esc(n)}</span>
+      ${count>1 ? `<span class="text-[11px] text-slate-400 shrink-0 ml-2">${count} variants</span>` : ''}
+    </button>`;
+  }).join('');
+}
+function hoFilterItems(idx){
+  const input = document.getElementById('ho-item-'+idx), dd = document.getElementById('ho-item-dropdown-'+idx);
+  if(!input || !dd) return;
+  dd.innerHTML = hoItemOptionsHtml(input.value, idx);
+  dd.classList.remove('hidden');
+}
+function hoHideItemDropdown(idx){
+  setTimeout(()=>{ const d = document.getElementById('ho-item-dropdown-'+idx); if(d) d.classList.add('hidden'); }, 150);
+}
+function hoItemTyped(idx){
+  const input = document.getElementById('ho-item-'+idx);
+  const pidEl = document.getElementById('ho-product-'+idx);
+  const p = pidEl.value ? getProduct(pidEl.value) : null;
+  // typing something other than the picked catalog item turns the row into a manual entry
+  if(p && input.value.trim().toLowerCase() !== p.name.toLowerCase()){
+    pidEl.value = '';
+    document.getElementById('ho-variant-'+idx).innerHTML = '';
+    document.querySelector(`.ho-line-wrap[data-line="${idx}"]`).classList.remove('has-variant');
+  }
+  hoRefreshItemHint(idx);
+  hoFilterItems(idx);
+}
+function hoSelectItemName(name, idx){
+  const variants = state.products.filter(p=>p.name===name).sort(byDisplayName);
+  if(!variants.length) return;
+  document.getElementById('ho-item-'+idx).value = name;
+  document.getElementById('ho-item-dropdown-'+idx).classList.add('hidden');
+  document.getElementById('ho-variant-'+idx).innerHTML = variants.map(v=>`<option value="${esc(v.id)}">${esc(v.variant&&v.variant.trim()?v.variant.trim():'Standard')}</option>`).join('');
+  document.getElementById('ho-product-'+idx).value = variants[0].id;
+  document.querySelector(`.ho-line-wrap[data-line="${idx}"]`).classList.add('has-variant');
+  hoRefreshItemHint(idx);
+}
+function hoSelectVariant(idx){
+  document.getElementById('ho-product-'+idx).value = document.getElementById('ho-variant-'+idx).value;
+  hoRefreshItemHint(idx);
+}
+function hoAssetOptionsHtml(filterText){
+  const f = (filterText||'').trim().toLowerCase();
+  const matches = state.assets.filter(a => !f || (a.name||'').toLowerCase().includes(f) || (a.departmentAssetCode||'').toLowerCase().includes(f) || (a.tag||'').toLowerCase().includes(f)).slice(0, 30);
+  if(!matches.length) return `<div class="px-3.5 py-2.5 text-sm text-slate-400">No matching asset — whatever you type is saved as the asset code.</div>`;
+  return matches.map(a=>`
+    <button type="button" onmousedown="event.preventDefault(); hoSelectAsset('${esc(a.id)}', __IDX__)" class="w-full text-left px-3.5 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2">
+      <span class="truncate">${esc(a.name)}</span>
+      <span class="text-[11px] text-slate-400 shrink-0 ml-2">${esc(hoAssetLabel(a)||'no code')}</span>
+    </button>`).join('');
+}
+function hoFilterAssets(idx){
+  const input = document.getElementById('ho-asset-'+idx), dd = document.getElementById('ho-asset-dropdown-'+idx);
+  if(!input || !dd) return;
+  dd.innerHTML = hoAssetOptionsHtml(input.value).replace(/__IDX__/g, idx);
+  dd.classList.remove('hidden');
+}
+function hoHideAssetDropdown(idx){
+  setTimeout(()=>{ const d = document.getElementById('ho-asset-dropdown-'+idx); if(d) d.classList.add('hidden'); }, 150);
+}
+function hoAssetTyped(idx){
+  const input = document.getElementById('ho-asset-'+idx);
+  const idEl = document.getElementById('ho-asset-id-'+idx);
+  const a = idEl.value ? state.assets.find(x=>x.id===idEl.value) : null;
+  // editing the code after picking an asset makes it a manual code again
+  if(a && input.value.trim() !== (hoAssetLabel(a) || a.name)) idEl.value = '';
+  hoRefreshAssetHint(idx);
+  hoFilterAssets(idx);
+}
+function hoSelectAsset(assetId, idx){
+  const a = state.assets.find(x=>x.id===assetId);
+  if(!a) return;
+  document.getElementById('ho-asset-'+idx).value = hoAssetLabel(a) || a.name;
+  document.getElementById('ho-asset-id-'+idx).value = a.id;
+  document.getElementById('ho-asset-dropdown-'+idx).classList.add('hidden');
+  const itemEl = document.getElementById('ho-item-'+idx);
+  if(!itemEl.value.trim()){ itemEl.value = a.name; hoRefreshItemHint(idx); }   // nothing entered yet: use the asset's name
+  const qtyEl = document.getElementById('ho-qty-'+idx);
+  if(!qtyEl.value) qtyEl.value = 1;                                               // an asset is a single unit
+  hoRefreshAssetHint(idx);
+}
+function addHandoverLine(){
+  const idx = hoLineCount++;
+  const wrap = document.getElementById('ho-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', hoLineHtml(idx));
+  return idx;
+}
+function removeHandoverLine(idx){
+  const el = document.querySelector(`.ho-line-wrap[data-line="${idx}"]`);
+  if(el) el.remove();
+}
 function openHandoverForm(id){
   const editing = id ? state.handovers.find(x=>x.id===id) : null;
-  const p = editing ? getProduct(editing.productId) : null;
+  const lines = editing && hoLines(editing).length ? hoLines(editing) : [{}];
+  hoLineCount = lines.length;
+  const inp = 'w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
   const body = `
     <div id="ho-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
-    <div class="grid grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
       <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Handover type *</label>
-        <input type="text" id="ho-type" value="${editing?esc(editing.handoverType||''):''}" placeholder="e.g. New issue, Transfer, Return" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Reference number *</label>
+        <input type="text" id="ho-ref" value="${editing?esc(editing.referenceNumber||''):''}" placeholder="e.g. HO-0001" class="${inp}">
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Handover date *</label>
-        <input type="date" id="ho-date" value="${editing?esc(editing.handoverDate||''):todayStr()}" max="${todayStr()}" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <input type="date" id="ho-date" value="${editing?esc(editing.handoverDate||''):localDateStr()}" max="${localDateStr()}" class="${inp}">
       </div>
-    </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-      <div class="relative">
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item *</label>
-        <input type="text" id="mf-item-search-0" autocomplete="off" placeholder="Search items…" value="${p?esc(p.name):''}"
-          oninput="filterMovementItems(0)" onfocus="this.select(); filterMovementItems(0);" onblur="hideMovementItemDropdown(0)"
-          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-        <div id="mf-item-dropdown-0" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
-        <div id="mf-item-code-0" class="text-[11px] text-slate-400 mt-1"></div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">Variant</label>
-        <select id="mf-variant-0" onchange="selectMovementVariant(0)" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white">
-          <option value="">Choose an item first…</option>
-        </select>
-        <input type="hidden" id="mf-product-0" value="${editing?esc(editing.productId||''):''}">
-      </div>
-    </div>
-    <div class="mb-4">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Item details</label>
-      <textarea id="ho-item-details" rows="2" placeholder="Condition, serial number, notes…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">${editing?esc(editing.itemDetails||''):''}</textarea>
     </div>
     <div class="mb-5">
-      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Quantity *</label>
-      <input type="number" min="0" step="any" id="ho-qty" value="${editing?editing.quantity:''}" placeholder="0" class="w-full sm:w-1/3 px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Handover type *</label>
+      <input type="text" id="ho-type" value="${editing?esc(editing.handoverType||''):''}" placeholder="e.g. New issue, Transfer, Return" class="${inp}">
     </div>
+    <div class="text-xs font-semibold text-slate-600 mb-2">Items</div>
+    <div id="ho-lines">${lines.map((line,idx)=>hoLineHtml(idx, line)).join('')}</div>
+    <button type="button" onclick="addHandoverLine()" class="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 hover:underline mb-5">+ Add another item</button>
     <div class="text-xs font-semibold text-slate-600 mb-2">From</div>
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
       <div class="relative">
         <label class="block text-xs text-slate-500 mb-1.5">Department</label>
         <input type="text" id="ho-from-department" autocomplete="off" value="${editing?esc(editing.fromDepartment||''):'Administration'}" placeholder="Search by name or code…"
-          oninput="filterDepartmentDropdown('ho-from')" onfocus="filterDepartmentDropdown('ho-from')" onblur="hideDepartmentDropdown('ho-from')"
-          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+          oninput="filterDepartmentDropdown('ho-from')" onfocus="filterDepartmentDropdown('ho-from')" onblur="hideDepartmentDropdown('ho-from')" class="${inp}">
         <div id="ho-from-department-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
       </div>
       <div>
         <label class="block text-xs text-slate-500 mb-1.5">Staff name</label>
-        <input type="text" id="ho-from-staff" value="${editing?esc(editing.fromStaffName||''):''}" placeholder="Name" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <input type="text" id="ho-from-staff" value="${editing?esc(editing.fromStaffName||''):''}" placeholder="Name" class="${inp}">
       </div>
       <div>
         <label class="block text-xs text-slate-500 mb-1.5">Designation</label>
-        <input type="text" id="ho-from-designation" value="${editing?esc(editing.fromDesignation||''):''}" placeholder="Job title" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <input type="text" id="ho-from-designation" value="${editing?esc(editing.fromDesignation||''):''}" placeholder="Job title" class="${inp}">
       </div>
     </div>
     <div class="text-xs font-semibold text-slate-600 mb-2">To</div>
@@ -4617,22 +4814,21 @@ function openHandoverForm(id){
       <div class="relative">
         <label class="block text-xs text-slate-500 mb-1.5">Department *</label>
         <input type="text" id="ho-to-department" autocomplete="off" value="${editing?esc(editing.toDepartment||''):''}" placeholder="Search by name or code…"
-          oninput="filterDepartmentDropdown('ho-to')" onfocus="filterDepartmentDropdown('ho-to')" onblur="hideDepartmentDropdown('ho-to')"
-          class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+          oninput="filterDepartmentDropdown('ho-to')" onfocus="filterDepartmentDropdown('ho-to')" onblur="hideDepartmentDropdown('ho-to')" class="${inp}">
         <div id="ho-to-department-dropdown" class="hidden absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"></div>
       </div>
       <div>
         <label class="block text-xs text-slate-500 mb-1.5">Staff name *</label>
-        <input type="text" id="ho-to-staff" value="${editing?esc(editing.toStaffName||''):''}" placeholder="Name" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <input type="text" id="ho-to-staff" value="${editing?esc(editing.toStaffName||''):''}" placeholder="Name" class="${inp}">
       </div>
       <div>
         <label class="block text-xs text-slate-500 mb-1.5">Designation</label>
-        <input type="text" id="ho-to-designation" value="${editing?esc(editing.toDesignation||''):''}" placeholder="Job title" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+        <input type="text" id="ho-to-designation" value="${editing?esc(editing.toDesignation||''):''}" placeholder="Job title" class="${inp}">
       </div>
     </div>
     <div class="mb-5">
       <label class="block text-xs font-semibold text-slate-600 mb-1.5">Handover file URL <span class="font-normal text-slate-400">(optional)</span></label>
-      <input type="url" id="ho-file-url" value="${editing?esc(editing.fileUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      <input type="url" id="ho-file-url" value="${editing?esc(editing.fileUrl||''):''}" placeholder="https://…" class="${inp}">
     </div>
     <div class="flex justify-between items-center gap-2.5">
       <div>${editing && canManageInventory() ? `<button class="px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50" onclick="deleteHandover('${editing.id}')">Delete</button>` : ''}</div>
@@ -4643,16 +4839,15 @@ function openHandoverForm(id){
     </div>
   `;
   openModal(editing ? 'Edit Handover' : 'New Handover', body, true);
-  if(editing && p) populateMovementVariants(p.name, 0);
+  lines.forEach((_, idx)=>{ hoRefreshItemHint(idx); hoRefreshAssetHint(idx); });
 }
 function saveHandover(id){
   const errEl = document.getElementById('ho-error');
   errEl.classList.add('hidden');
+  const fail = msg => { errEl.textContent = msg; errEl.classList.remove('hidden'); };
+  const referenceNumber = document.getElementById('ho-ref').value.trim();
   const handoverType = document.getElementById('ho-type').value.trim();
   const handoverDate = document.getElementById('ho-date').value;
-  const productId = document.getElementById('mf-product-0').value;
-  const itemDetails = document.getElementById('ho-item-details').value.trim();
-  const quantity = Number(document.getElementById('ho-qty').value);
   const fromDepartment = document.getElementById('ho-from-department').value.trim();
   const fromStaffName = document.getElementById('ho-from-staff').value.trim();
   const fromDesignation = document.getElementById('ho-from-designation').value.trim();
@@ -4660,19 +4855,45 @@ function saveHandover(id){
   const toStaffName = document.getElementById('ho-to-staff').value.trim();
   const toDesignation = document.getElementById('ho-to-designation').value.trim();
   const fileUrl = document.getElementById('ho-file-url').value.trim();
-  const itemNameTyped = document.getElementById('mf-item-search-0').value.trim();
 
-  if(!handoverType){ errEl.textContent='Handover type is required.'; errEl.classList.remove('hidden'); return; }
-  if(!handoverDate){ errEl.textContent='Handover date is required.'; errEl.classList.remove('hidden'); return; }
-  if(!itemNameTyped){ errEl.textContent='Item is required.'; errEl.classList.remove('hidden'); return; }
-  if(!quantity || quantity<=0){ errEl.textContent='Enter a quantity greater than zero.'; errEl.classList.remove('hidden'); return; }
-  if(!toDepartment){ errEl.textContent='"To" department is required.'; errEl.classList.remove('hidden'); return; }
-  if(!toStaffName){ errEl.textContent='"To" staff name is required.'; errEl.classList.remove('hidden'); return; }
+  if(!referenceNumber){ fail('Reference number is required.'); return; }
+  if(state.handovers.some(h=>(h.referenceNumber||'').toLowerCase()===referenceNumber.toLowerCase() && h.id!==id)){ fail('That reference number is already used by another handover.'); return; }
+  if(!handoverType){ fail('Handover type is required.'); return; }
+  if(!handoverDate){ fail('Handover date is required.'); return; }
 
-  const data = { handoverType, handoverDate, productId, itemName: itemNameTyped, itemDetails, quantity, fromDepartment, fromStaffName, fromDesignation, toDepartment, toStaffName, toDesignation, fileUrl };
+  const lineItems = [];
+  for(const el of document.querySelectorAll('.ho-line-wrap')){
+    const i = el.dataset.line;
+    const typed = document.getElementById('ho-item-'+i).value.trim();
+    const pid = document.getElementById('ho-product-'+i).value;
+    const p = pid ? getProduct(pid) : null;
+    const itemName = p ? displayName(p) : typed;               // a picked catalog item keeps its variant in the name
+    const quantity = Number(document.getElementById('ho-qty-'+i).value);
+    if(!itemName){ fail('Enter an item for every row (pick one from the catalog or type it in).'); return; }
+    if(!quantity || quantity<=0){ fail(`Enter a quantity greater than zero for ${itemName}.`); return; }
+    lineItems.push({
+      itemName, productId: p ? p.id : '', quantity,
+      itemDetails: document.getElementById('ho-details-'+i).value.trim(),
+      assetCode: document.getElementById('ho-asset-'+i).value.trim(),
+      assetId: document.getElementById('ho-asset-id-'+i).value || null,
+    });
+  }
+  if(!lineItems.length){ fail('Add at least one item.'); return; }
+  const seenAssets = new Set();
+  for(const l of lineItems){
+    const key = (l.assetCode||'').toLowerCase();
+    if(!key) continue;
+    if(seenAssets.has(key)){ fail(`Asset code ${l.assetCode} is on more than one item — an asset can only be handed over once in a handover.`); return; }
+    seenAssets.add(key);
+  }
+  if(!toDepartment){ fail('"To" department is required.'); return; }
+  if(!toStaffName){ fail('"To" staff name is required.'); return; }
+
+  const data = { referenceNumber, handoverType, handoverDate, lineItems, fromDepartment, fromStaffName, fromDesignation, toDepartment, toStaffName, toDesignation, fileUrl };
   if(id){
     const editing = state.handovers.find(x=>x.id===id);
     Object.assign(editing, data);
+    ['productId','itemName','itemDetails','quantity'].forEach(k=>{ delete editing[k]; });   // the old single-item fields now live in lineItems
     persistHandoverDoc(editing);
     toast('Handover updated.');
   } else {
@@ -4696,8 +4917,16 @@ function deleteHandover(id){
     rerenderMain();
   });
 }
+function hoItemsCellHtml(h){
+  const lines = hoLines(h);
+  if(!lines.length) return '<span class="text-slate-300">—</span>';
+  const shown = lines.slice(0, 3).map(l=>`
+    <div class="ho-item-line">${esc(l.itemName)} <span class="text-slate-400 num">× ${fmtNum(l.quantity)}</span>${l.assetCode?` <span class="inline-flex px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10.5px] font-semibold">${esc(l.assetCode)}</span>`:''}</div>`).join('');
+  const more = lines.length > 3 ? `<div class="text-[11px] text-slate-400">+${lines.length-3} more</div>` : '';
+  return shown + more;
+}
 function viewHandovers(){
-  const list = [...state.handovers].sort((a,b)=>(b.handoverDate+b.createdAt||'').localeCompare(a.handoverDate+a.createdAt||''));
+  const list = [...state.handovers].sort((a,b)=>((b.handoverDate||'')+(b.createdAt||'')).localeCompare((a.handoverDate||'')+(a.createdAt||'')));
   return `
     <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
@@ -4711,22 +4940,28 @@ function viewHandovers(){
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-            <th class="px-5 sm:px-6 py-3 font-semibold">Date</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Item</th><th class="py-3 font-semibold text-right">Qty</th>
+            <th class="px-5 sm:px-6 py-3 font-semibold">Reference</th><th class="py-3 font-semibold">Type</th><th class="py-3 font-semibold">Items</th>
             <th class="py-3 font-semibold">From</th><th class="py-3 font-semibold">To</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
-          <tbody>${list.map(h=>`
+          <tbody>${list.map(h=>{
+            const lines = hoLines(h);
+            const tip = lines.map(l=>l.itemName + ' × ' + l.quantity + (l.assetCode ? ' [' + l.assetCode + ']' : '')).join('\n');
+            return `
             <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-              <td class="px-5 sm:px-6 py-3 text-slate-500">${fmtDate(h.handoverDate)}</td>
-              <td class="py-3 text-slate-600">${esc(h.handoverType)}</td>
-              <td class="py-3 text-slate-700">${esc(h.itemName)}${h.fileUrl?` <a href="${esc(h.fileUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-[11px] text-brand-600 hover:underline">File ↗</a>`:''}</td>
-              <td class="py-3 text-right num font-medium">${fmtNum(h.quantity)}</td>
-              <td class="py-3 text-slate-500">${esc(h.fromStaffName||'—')}${h.fromDesignation?(' <span class="text-slate-400">· '+esc(h.fromDesignation)+'</span>'):''}<div class="text-[11px] text-slate-400">${esc(h.fromDepartment||'—')}</div></td>
-              <td class="py-3 text-slate-500">${esc(h.toStaffName||'—')}${h.toDesignation?(' <span class="text-slate-400">· '+esc(h.toDesignation)+'</span>'):''}<div class="text-[11px] text-slate-400">${esc(h.toDepartment||'—')}</div></td>
-              <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+              <td class="px-5 sm:px-6 py-3 align-top whitespace-nowrap">
+                <div class="font-bold text-slate-800 num">${h.referenceNumber ? esc(h.referenceNumber) : '<span class="font-normal text-slate-300">—</span>'}</div>
+                <div class="text-[11.5px] text-slate-400">${fmtDate(h.handoverDate)}</div>
+              </td>
+              <td class="py-3 align-top text-slate-600">${esc(h.handoverType)}</td>
+              <td class="py-3 align-top text-slate-700" title="${esc(tip)}">${hoItemsCellHtml(h)}</td>
+              <td class="py-3 align-top text-slate-500">${esc(h.fromStaffName||'—')}${h.fromDesignation?(' <span class="text-slate-400">· '+esc(h.fromDesignation)+'</span>'):''}<div class="text-[11px] text-slate-400">${esc(h.fromDepartment||'—')}</div></td>
+              <td class="py-3 align-top text-slate-500">${esc(h.toStaffName||'—')}${h.toDesignation?(' <span class="text-slate-400">· '+esc(h.toDesignation)+'</span>'):''}<div class="text-[11px] text-slate-400">${esc(h.toDepartment||'—')}</div></td>
+              <td class="py-3 pr-5 sm:pr-6 align-top text-right whitespace-nowrap">
+                ${h.fileUrl?`<a href="${esc(h.fileUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-xs font-semibold text-brand-600 hover:underline mr-3">File ↗</a>`:''}
                 <button onclick="openHandoverForm('${h.id}')" class="text-xs font-semibold text-brand-600 hover:underline">Edit</button>
               </td>
-            </tr>
-          `).join('')}</tbody>
+            </tr>`;
+          }).join('')}</tbody>
         </table>
       </div>` : `
       <div class="text-center py-16 px-6">
