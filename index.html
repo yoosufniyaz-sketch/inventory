@@ -2596,6 +2596,8 @@ function hideDepartmentDropdown(prefix){
 function selectDepartmentOption(name, prefix){
   prefix = prefix || 'mf';
   document.getElementById(prefix+'-department').value = name;
+  const dropdown = document.getElementById(prefix+'-department-dropdown');
+  if(dropdown) dropdown.classList.add('hidden');      // the option keeps focus in the box, so nothing else would close the list
 }
 function acquisitionBreakdown(list){
   const map = {};
@@ -4045,6 +4047,7 @@ const PR_BUDGET_CODES = [
   'PPE Insurance',
   'Foreign Travel',
   'Safety Expenses',
+  'Events and Ceremonies',
 ];
 // A value that isn't in the list (e.g. on an older requisition) stays selectable, so editing never silently drops it.
 function prBudgetCodeOptionsHtml(current){
@@ -4289,6 +4292,8 @@ function selectPrLineSku(productId, idx){
   if(!p) return;
   document.getElementById('pr-sku-search-'+idx).value = prLineItemSkuLabel(p);
   document.getElementById('pr-sku-id-'+idx).value = productId;
+  const skuDropdown = document.getElementById('pr-sku-dropdown-'+idx);
+  if(skuDropdown) skuDropdown.classList.add('hidden');
   const nameInput = document.getElementById('pr-item-name-'+idx);
   if(nameInput && !nameInput.value.trim()) nameInput.value = displayName(p);
 }
@@ -4318,6 +4323,8 @@ function selectPrLineAsset(assetId, idx){
   if(!a) return;
   document.getElementById('pr-asset-search-'+idx).value = prLineItemAssetLabel(a);
   document.getElementById('pr-asset-id-'+idx).value = assetId;
+  const assetDropdown = document.getElementById('pr-asset-dropdown-'+idx);
+  if(assetDropdown) assetDropdown.classList.add('hidden');
 }
 function openPurchaseRequisitionForm(id){
   const editing = id ? state.purchaseRequisitions.find(x=>x.id===id) : null;
