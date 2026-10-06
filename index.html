@@ -4426,6 +4426,16 @@ function openPurchaseRequisitionForm(id){
         <label class="block text-xs font-semibold text-slate-600 mb-1.5">Invoice URL</label>
         <input type="url" id="pr-url-invoice" value="${editing?esc(editing.invoiceUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
       </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">TOR URL</label>
+        <input type="url" id="pr-url-tor" value="${editing?esc(editing.torUrl||''):''}" placeholder="https://…" class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+      </div>
+    </div>
+    <div class="mb-5">
+      <div class="text-xs font-semibold text-slate-600 mb-2">Other links <span class="font-normal text-slate-400">(optional, up to ${PR_MAX_OTHER_LINKS} — give each one a name)</span></div>
+      <datalist id="pr-link-names">${prKnownLinkNames().map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>
+      <div id="pr-other-links">${prOtherLinkRowsHtml(editing)}</div>
+      <button type="button" id="pr-add-olink" onclick="addPrOtherLink()" class="text-xs font-semibold text-brand-600 hover:underline">+ Add another link</button>
     </div>
     <div class="flex justify-between items-center gap-2.5">
       <div>${editing && canManageInventory() ? `<button class="px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50" onclick="deletePurchaseRequisition('${editing.id}')">Delete</button>` : ''}</div>
@@ -4437,6 +4447,7 @@ function openPurchaseRequisitionForm(id){
   `;
   openModal(editing ? 'Edit Purchase Requisition' : 'New Purchase Requisition', body, true);
   watchModalStickyHead();
+  prRefreshOtherLinksUi();
 }
 function applyPrAutoStockIn(pr){
   const loc = getLocation(pr.locationId);
@@ -4475,6 +4486,21 @@ function savePurchaseRequisition(id){
   const poUrl = document.getElementById('pr-url-po').value.trim();
   const doUrl = document.getElementById('pr-url-do').value.trim();
   const invoiceUrl = document.getElementById('pr-url-invoice').value.trim();
+  const torRaw = document.getElementById('pr-url-tor').value.trim();
+  const torUrl = normalizeWebUrl(torRaw);
+  const otherLinks = [];
+  for(const row of document.querySelectorAll('#pr-other-links .pr-olink-row')){
+    const i = row.dataset.olink;
+    const label = document.getElementById('pr-olink-name-' + i).value.trim();
+    const rawUrl = document.getElementById('pr-olink-url-' + i).value.trim();
+    if(!label && !rawUrl) continue;                                           // an empty row is simply ignored
+    if(!label){ errEl.textContent = 'Give each other link a name.'; errEl.classList.remove('hidden'); return; }
+    if(!rawUrl){ errEl.textContent = `Add the link for "${label}", or clear that row.`; errEl.classList.remove('hidden'); return; }
+    const url = normalizeWebUrl(rawUrl);
+    if(url === null){ errEl.textContent = `The link for "${label}" must be a web address (starting with https://).`; errEl.classList.remove('hidden'); return; }
+    otherLinks.push({ label, url });
+  }
+  if(torUrl === null){ errEl.textContent = 'The TOR link must be a web address (starting with https://).'; errEl.classList.remove('hidden'); return; }
 
   if(!prNumber){ errEl.textContent='PR Number is required.'; errEl.classList.remove('hidden'); return; }
   if(!requisitionDate){ errEl.textContent='Requisition date is required.'; errEl.classList.remove('hidden'); return; }
@@ -4506,7 +4532,7 @@ function savePurchaseRequisition(id){
   const wasAlreadyClosed = editing ? editing.status === 'closed' : false;
 
   if(editing){
-    Object.assign(editing, { prNumber, requisitionDate, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost });
+    Object.assign(editing, { prNumber, requisitionDate, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, torUrl, otherLinks, lineItems, totalCost });
     if(status === 'closed' && !wasAlreadyClosed){
       applyPrAutoStockIn(editing);
       toast('Purchase requisition closed — linked stock items added to inventory.');
@@ -4516,7 +4542,7 @@ function savePurchaseRequisition(id){
     persistPurchaseRequisitionDoc(editing);
   } else {
     const pr = {
-      id: uid(), prNumber, requisitionDate, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, lineItems, totalCost,
+      id: uid(), prNumber, requisitionDate, requester, locationId, status, prUrl, poUrl, doUrl, invoiceUrl, torUrl, otherLinks, lineItems, totalCost,
       createdByName: authUser ? authUser.name : null,
       createdByEmail: authUser ? authUser.email : null,
       createdAt: nowISO(),
@@ -4551,15 +4577,75 @@ function deletePurchaseRequisition(id){
     rerenderMain();
   });
 }
+
+// ---- requisition links: TOR plus up to five other named links
+const PR_MAX_OTHER_LINKS = 5;
+// a link only opens if it is a web address; a bare "site.com/path" gets https:// (never javascript:, data: and the like)
+function normalizeWebUrl(raw){
+  const u = String(raw || '').trim();
+  if(!u) return '';
+  if(/^https?:\/\//i.test(u)) return u;
+  if(/^[a-z][a-z0-9+.\-]*:/i.test(u) && !/^[\w.\-]+:\d+(\/|$)/.test(u)) return null;   // some other kind of link: refused
+  return 'https://' + u.replace(/^\/+/, '');
+}
+function prOtherLinks(pr){
+  return (Array.isArray(pr.otherLinks) ? pr.otherLinks : []).filter(l => l && l.url);
+}
+function prKnownLinkNames(){
+  const names = new Set();
+  state.purchaseRequisitions.forEach(pr => prOtherLinks(pr).forEach(l => { if(l.label) names.add(l.label); }));
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+function prOtherLinkRowHtml(idx, link){
+  const inp = 'px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
+  return `
+    <div class="pr-olink-row flex flex-col sm:flex-row sm:items-center gap-2.5 mb-2.5" data-olink="${idx}">
+      <input type="text" id="pr-olink-name-${idx}" list="pr-link-names" value="${esc((link && link.label) || '')}" placeholder="Name, e.g. Quotation" maxlength="60" class="sm:w-48 shrink-0 ${inp}">
+      <input type="url" id="pr-olink-url-${idx}" value="${esc((link && link.url) || '')}" placeholder="https://…" class="flex-1 min-w-0 ${inp}">
+      <button type="button" onclick="removePrOtherLink(${idx})" class="text-slate-400 hover:text-rose-600 px-1 self-end sm:self-center" title="Remove this link">✕</button>
+    </div>`;
+}
+let prOtherLinkSeq = 0;
+function prOtherLinkRowsHtml(editing){
+  const existing = editing ? prOtherLinks(editing).slice(0, PR_MAX_OTHER_LINKS) : [];
+  prOtherLinkSeq = existing.length;
+  return existing.map((l, i) => prOtherLinkRowHtml(i, l)).join('');
+}
+function prRefreshOtherLinksUi(){
+  const rows = document.querySelectorAll('#pr-other-links .pr-olink-row').length;
+  const btn = document.getElementById('pr-add-olink');
+  if(btn) btn.classList.toggle('hidden', rows >= PR_MAX_OTHER_LINKS);
+}
+function addPrOtherLink(){
+  const box = document.getElementById('pr-other-links');
+  if(!box || box.querySelectorAll('.pr-olink-row').length >= PR_MAX_OTHER_LINKS) return;
+  const idx = prOtherLinkSeq++;
+  box.insertAdjacentHTML('beforeend', prOtherLinkRowHtml(idx, null));
+  prRefreshOtherLinksUi();
+  const el = document.getElementById('pr-olink-name-' + idx);
+  if(el) el.focus();
+}
+function removePrOtherLink(idx){
+  const row = document.querySelector(`#pr-other-links .pr-olink-row[data-olink="${idx}"]`);
+  if(row) row.remove();
+  prRefreshOtherLinksUi();
+}
 function prDocLinksHtml(pr, topMargin){
   const links = [
     pr.prUrl ? { label:'PR', url:pr.prUrl } : null,
     pr.poUrl ? { label:'PO', url:pr.poUrl } : null,
     pr.doUrl ? { label:'DO', url:pr.doUrl } : null,
     pr.invoiceUrl ? { label:'Invoice', url:pr.invoiceUrl } : null,
-  ].filter(Boolean);
+    pr.torUrl ? { label:'TOR', url:pr.torUrl } : null,
+  ].concat(prOtherLinks(pr).map(l => ({ label: l.label || 'Link', url: l.url }))).filter(Boolean);
   if(!links.length) return '';
-  return `<div class="flex flex-wrap gap-1.5 ${topMargin||'mt-2'}">${links.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200">${esc(l.label)} ↗</a>`).join('')}</div>`;
+  const chip = 'inline-flex max-w-[11rem] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10.5px] font-semibold hover:bg-slate-200';
+  return `<div class="flex flex-wrap gap-1.5 ${topMargin||'mt-2'}">${links.map(l => {
+    const href = normalizeWebUrl(l.url);
+    return href
+      ? `<a href="${esc(href)}" target="_blank" rel="noopener" title="${esc(l.label)}" onclick="event.stopPropagation()" class="${chip}"><span class="truncate">${esc(l.label)}</span>&nbsp;↗</a>`
+      : `<span title="${esc(l.url)} (not a web address)" class="inline-flex max-w-[11rem] px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 text-[10.5px] font-semibold line-through"><span class="truncate">${esc(l.label)}</span></span>`;
+  }).join('')}</div>`;
 }
 function prBudgetCodeText(pr){
   const codes = [...new Set((pr.lineItems||[]).map(l=>prLineBudgetCode(pr, l)).filter(Boolean))];
@@ -4601,7 +4687,7 @@ function prCardHtml(pr){
   `;
 }
 function exportPurchaseRequisitionsCSV(){
-  const header = ['PR Number','Requisition Date','Requester','Location','Status','Item Name','Item Description','Budget Code','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL'];
+  const header = ['PR Number','Requisition Date','Requester','Location','Status','Item Name','Item Description','Budget Code','Quantity','Unit Cost','Total Cost','Linked SKU','Linked Asset Code','Stocked In','PR URL','PO URL','DO URL','Invoice URL','TOR URL','Other Links'];
   const rows = [];
   [...state.purchaseRequisitions].sort(prSortCompare(currentPrSort())).forEach(pr=>{
     const loc = getLocation(pr.locationId);
@@ -4612,7 +4698,7 @@ function exportPurchaseRequisitionsCSV(){
         pr.prNumber, prRequisitionDate(pr), pr.requester, loc?loc.name:'', prStatusMeta(pr.status).label,
         line.itemName, line.itemDescription||'', prLineBudgetCode(pr, line), line.quantity, line.unitCost, line.totalCost,
         linkedProduct?(linkedProduct.sku||''):'', linkedAsset?(linkedAsset.departmentAssetCode||linkedAsset.tag||''):'', line.stockedIn?'Yes':'No',
-        pr.prUrl||'', pr.poUrl||'', pr.doUrl||'', pr.invoiceUrl||'',
+        pr.prUrl||'', pr.poUrl||'', pr.doUrl||'', pr.invoiceUrl||'', pr.torUrl||'', prOtherLinks(pr).map(l => (l.label||'Link') + ': ' + l.url).join(' | '),
       ]);
     });
   });
