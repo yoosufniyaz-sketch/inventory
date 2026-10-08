@@ -206,6 +206,16 @@
   html[data-theme="dark"] .sticky-thead th{ background-color: #1e293b; box-shadow: 0 1px 0 0 #334155; }
   html[data-theme="dark"] ::-webkit-scrollbar-thumb{ background:#475569; }
 
+  .vh-bar{ height:6px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
+  .vh-bar i{ display:block; height:100%; border-radius:999px; background:#10b981; }
+  .vh-bar.warn i{ background:#f59e0b; } .vh-bar.crit i{ background:#f43f5e; }
+  .vh-ax{ fill:#64748b; font-size:11px; } .vh-pie-total{ fill:#0f172a; font-size:26px; font-weight:800; }
+  .vh-grid{ stroke:#e2e8f0; } .vh-grid.base{ stroke:#cbd5e1; } .vh-xhair{ stroke:#94a3b8; stroke-dasharray:3 3; }
+  .vh-hdot{ stroke:#fff; stroke-width:2; } .vh-slice{ stroke:#fff; stroke-width:2; stroke-linejoin:round; transition:opacity .12s; }
+  .vh-tip{ position:absolute; pointer-events:none; background:#0f172a; color:#fff; border-radius:8px; padding:8px 11px; font-size:12px; line-height:1.5; box-shadow:0 6px 18px rgba(0,0,0,.25); z-index:5; min-width:140px; }
+  html[data-theme="dark"] .vh-bar{ background:#334155; } html[data-theme="dark"] .vh-ax{ fill:#94a3b8; } html[data-theme="dark"] .vh-pie-total{ fill:#f1f5f9; }
+  html[data-theme="dark"] .vh-grid{ stroke:#334155; } html[data-theme="dark"] .vh-grid.base{ stroke:#475569; } html[data-theme="dark"] .vh-hdot, html[data-theme="dark"] .vh-slice{ stroke:#1e293b; }
+  html[data-theme="dark"] .vh-tip{ background:#0b1220; border:1px solid #334155; }
   @media print{
     .no-print{ display:none !important; }
     body{ background:#fff; }
@@ -319,6 +329,7 @@ const ui = {
   productsFilter: { search:'', category:'' },
   movementsFilter: { search:'', type:'', locationId:'', acquisition:'', dateFrom:'', dateTo:'' },
   movementsView: 'log',
+  reportView: 'log',
   trendDateFrom: new Date().getFullYear()+'-01-01',
   trendDateTo: new Date().getFullYear()+'-12-31',
   assetsFilter: { search:'', locationId:'', department:'' },
@@ -467,7 +478,7 @@ function unsyncedRecords(key, opts){
   return (state[key]||[]).filter(r=>{
     if(!r || !r.id || known.has(r.id)) return false;
     if(opts && opts.ignoreGrace) return true;
-    const t = r.createdAt ? Date.parse(r.createdAt) : NaN;
+    const t = typeof r.createdAt === 'number' ? r.createdAt : (r.createdAt ? Date.parse(r.createdAt) : NaN);   // dates are stored as text or as milliseconds
     return !(t && now - t < UNSYNCED_GRACE_MS);
   });
 }
@@ -751,6 +762,7 @@ function clearLocalDataCache(){
   state.itemTransfers = [];
   state.purchaseRequisitions = [];
   state.handovers = [];
+  vehClearState();
   LOCATIONS = DEFAULT_LOCATIONS.map(l=>({...l}));
   localStorage.removeItem(STORAGE_PREFIX+'products');
   localStorage.removeItem(STORAGE_PREFIX+'movements');
@@ -806,6 +818,8 @@ async function initCloudIfConfigured(){
         listenToCloudItemTransfers();
         listenToCloudPurchaseRequisitions();
         listenToCloudHandovers();
+        startVehicleListeners();
+        listenPendingMembers();
         listenToCloudLocations();
         listenToCloudNotificationSettings();
         listenToAllProfiles();
@@ -821,6 +835,7 @@ async function initCloudIfConfigured(){
         if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
         if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
         if(handoversUnsub){ handoversUnsub(); handoversUnsub = null; }
+        stopVehicleListeners();
         if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
         if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
         if(profileUnsub){ profileUnsub(); profileUnsub = null; }
@@ -860,7 +875,7 @@ async function isUserBlocked(uid){
     return uids.includes(uid);
   }catch(e){ return false; }
 }
-async function ensureOwnProfileDoc(user, extra){ if(!firestoreProfilesRef || !firestoreDb) return; try{ if(await isUserBlocked(user.uid)) return; let assignedRole = null; const metaRef = firestoreDb.collection('fdc_inventory_meta').doc('adminStatus'); await firestoreDb.runTransaction(async (tx) => { const ref = firestoreProfilesRef.doc(user.uid); const snap = await tx.get(ref); if(snap.exists) return; const metaSnap = await tx.get(metaRef); const alreadyHasAdmin = metaSnap.exists && metaSnap.data().assigned; const role = alreadyHasAdmin ? 'member' : 'admin'; const data = Object.assign({ uid:user.uid, email:user.email, name:user.displayName||user.email, role, designation:'', department:'', createdAt: Date.now() }, extra||{}); tx.set(ref, data); if(!alreadyHasAdmin) tx.set(metaRef, { assigned:true }); assignedRole = role; }); if(assignedRole && authUser && authUser.uid===user.uid){ authUser.role = assignedRole; renderApp(); } }catch(e){ } }
+async function ensureOwnProfileDoc(user, extra){ if(!firestoreProfilesRef || !firestoreDb) return; try{ if(await isUserBlocked(user.uid)) return; let assignedRole = null; let pm = null; try{ const pmDoc = await firestoreDb.collection('fdc_inventory_meta').doc('pendingMembers').get(); const lst = pmDoc.exists && pmDoc.data() && pmDoc.data().list; pm = lst ? (lst[pmKey(user.email)] || null) : null; }catch(e){} const metaRef = firestoreDb.collection('fdc_inventory_meta').doc('adminStatus'); await firestoreDb.runTransaction(async (tx) => { const ref = firestoreProfilesRef.doc(user.uid); const snap = await tx.get(ref); if(snap.exists) return; const metaSnap = await tx.get(metaRef); const alreadyHasAdmin = metaSnap.exists && metaSnap.data().assigned; const role = alreadyHasAdmin ? 'member' : 'admin'; const data = Object.assign({ uid:user.uid, email:user.email, name:(pm&&pm.name)||user.displayName||user.email, role, designation:(pm&&pm.designation)||'', department:(pm&&pm.department)||'', createdAt: Date.now() }, extra||{}); tx.set(ref, data); if(!alreadyHasAdmin) tx.set(metaRef, { assigned:true }); assignedRole = role; }); if(assignedRole && authUser && authUser.uid===user.uid){ authUser.role = assignedRole; renderApp(); } }catch(e){ } }
 let lastCloudErrorToastAt = 0;
 function handleCloudSyncError(err, collectionLabel){
   cloudStatus = 'error';
@@ -1028,6 +1043,7 @@ function disconnectCloud(){
     if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
     if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
     if(handoversUnsub){ handoversUnsub(); handoversUnsub = null; }
+    stopVehicleListeners();
     if(locationsUnsub){ locationsUnsub(); locationsUnsub = null; }
     if(notifSettingsUnsub){ notifSettingsUnsub(); notifSettingsUnsub = null; }
     if(firebaseAuth){ try{ await firebaseAuth.signOut(); }catch(e){} }
@@ -1342,6 +1358,7 @@ async function saveCloudConfig(){
     if(itemTransfersUnsub){ itemTransfersUnsub(); itemTransfersUnsub = null; }
     if(purchaseRequisitionsUnsub){ purchaseRequisitionsUnsub(); purchaseRequisitionsUnsub = null; }
     if(handoversUnsub){ handoversUnsub(); handoversUnsub = null; }
+    stopVehicleListeners();
     firestoreDb = null; firestoreItemsRef = null; firestoreMovementsRef = null; firestoreAssetsRef = null; firestoreAssetTransfersRef = null; firestoreItemTransfersRef = null; firestorePurchaseRequisitionsRef = null; firestoreHandoversRef = null; firebaseAuth = null; authUser = null;
     await initCloudIfConfigured();
   }catch(e){
@@ -1416,6 +1433,10 @@ const ICONS = {
   admin:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 2.5 16.5 5v5c0 4-2.8 6.5-6.5 7.5-3.7-1-6.5-3.5-6.5-7.5V5z"/><path d="m7.2 10 1.8 1.8 3.8-3.8"/></svg>',
   locations:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 4.5 7 3l6 2 4.5-1.5v11L13 16l-6-2-4.5 1.5z"/><path d="M7 3v11M13 5v11"/></svg>',
   pr:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5.5 2.5h7l3 3v12h-10z"/><path d="M12.5 2.5v3h3"/><path d="M7 10.5h6M7 13h6M7 8h3"/></svg>',
+  vehicle:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 11l1.5-4.5A2 2 0 0 1 6.4 5h7.2a2 2 0 0 1 1.9 1.5L17 11"/><rect x="2.5" y="11" width="15" height="4.5" rx="1.5"/><circle cx="6" cy="13.3" r=".7"/><circle cx="14" cy="13.3" r=".7"/></svg>',
+  fuel:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 17V4.5A1.5 1.5 0 0 1 5.5 3h5A1.5 1.5 0 0 1 12 4.5V17"/><path d="M3 17h10"/><path d="M6 6.5h4"/><path d="M12 8h1.5A1.5 1.5 0 0 1 15 9.5V13a1 1 0 0 0 2 0V7l-2-2"/></svg>',
+  service:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12.5 3a4 4 0 0 0-3.7 5.4L3.5 13.7a1.6 1.6 0 0 0 2.3 2.3l5.3-5.3A4 4 0 0 0 16.5 7.5l-2.3 2.3-2-.5-.5-2 2.3-2.3A4 4 0 0 0 12.5 3z"/></svg>',
+  chart:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17V3"/><path d="M3 17h14"/><path d="M6 13l3-4 3 2 4-6"/></svg>',
   handover:'<svg width="18" height="18" class="w-[18px] h-[18px] shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 7 7 3l2 2-4.5 4z"/><path d="M4 5.5 7.5 9"/><path d="M17.5 13 13 17l-2-2 4.5-4z"/><path d="M16 14.5 12.5 11"/></svg>',
 };
 function canManageInventory(){ return !authUser || authUser.role==='admin'; }
@@ -1424,28 +1445,39 @@ function canAcceptTransferForLocation(locationId){
   const loc = getLocation(locationId);
   return !!(loc && loc.custodianUid && authUser && authUser.uid===loc.custodianUid);
 }
-const NAV_BASE = [
-  { id:'dashboard', label:'Dashboard', icon:'dashboard' },
-  { id:'products', label:'Items', icon:'products' },
-  { id:'levels', label:'Stock Levels', icon:'levels' },
-  { id:'movements', label:'Stock Movements', icon:'movements' },
-  { id:'assets', label:'Assets', icon:'assets' },
-  { id:'asset-transactions', label:'Asset Movements', icon:'assettx' },
-  { id:'purchase-requisitions', label:'Purchase Requisitions', icon:'pr' },
-  { id:'handovers', label:'Handovers', icon:'handover' },
-];
 function currentNav(){
-  const nav = [...NAV_BASE];
+  let vAlerts = [], rAlerts = [];
+  try{ vAlerts = vehAlerts(); rAlerts = vehReqAlerts(); }catch(e){}
+  const tone = list => list.some(a=>a.st.k==='crit') ? 'crit' : 'warn';
+  const nav = [
+    { id:'dashboard', label:'Dashboard', icon:'dashboard' },
+    { section:'Stock Inventory' },
+    { id:'products', label:'Items', icon:'products' },
+    { id:'levels', label:'Stock Levels', icon:'levels' },
+    { id:'movements', label:'Stock Movements', icon:'movements' },
+    { id:'stock-report', label:'Report', icon:'chart' },
+    { section:'Asset Management' },
+    { id:'assets', label:'Assets', icon:'assets' },
+    { id:'asset-transactions', label:'Asset Movements', icon:'assettx' },
+    { section:'Vehicle Management' },
+    { id:'vehicles', label:'Vehicles', icon:'vehicle', badge:vAlerts.length, tone:tone(vAlerts) },
+    { id:'fueling', label:'Fueling', icon:'fuel', badge:rAlerts.length, tone:tone(rAlerts) },
+    { id:'servicing', label:'Servicing', icon:'service' },
+    { id:'vehicle-reports', label:'Report', icon:'chart' },
+    { section:'Manage' },
+    { id:'handovers', label:'Handovers', icon:'handover' },
+    { id:'purchase-requisitions', label:'Purchase Requisitions', icon:'pr' },
+  ];
   if(canManageInventory()) nav.push({ id:'locations', label:'Locations', icon:'locations' });
   if(authUser && authUser.role==='admin') nav.push({ id:'admin', label:'Admin Panel', icon:'admin' });
   return nav;
 }
 
 function renderNav(){
-  document.getElementById('nav-list').innerHTML = currentNav().map(n=>`
+  document.getElementById('nav-list').innerHTML = currentNav().map(n=> n.section ? `<div class="px-3 pt-3 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">${n.section}</div>` : `
     <a href="#" onclick="goTo('${n.id}');return false;"
-       class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] font-medium transition-colors ${(ui.tab===n.id || (n.id==='assets' && ui.tab==='asset-detail') || (n.id==='products' && ui.tab==='item-detail')) ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
-      ${ICONS[n.icon]}<span>${n.label}</span>
+       class="flex items-center gap-3 px-3 py-2 rounded-lg text-[13.5px] font-medium transition-colors ${(ui.tab===n.id || (n.id==='assets' && ui.tab==='asset-detail') || (n.id==='products' && ui.tab==='item-detail') || (n.id==='vehicles' && ui.tab==='vehicle-detail')) ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}">
+      ${ICONS[n.icon]}<span class="flex-1">${n.label}</span>${n.badge ? `<span class="ml-auto min-w-[1.25rem] text-center px-1.5 py-0.5 rounded-full text-[10.5px] font-bold ${n.tone==='crit' ? 'bg-rose-500 text-white' : 'bg-amber-400 text-slate-900'}">${n.badge}</span>` : ''}
     </a>
   `).join('');
 }
@@ -1539,6 +1571,1074 @@ function confirmAction(message, onYes){
 /* =====================================================================
    INIT
 ===================================================================== */
+
+/* =====================================================================
+   VEHICLES — vehicle register, statutory documents (annual fee, insurance, roadworthiness), fuel requisitions
+   (PR / petty cash) and the fuel log, servicing and incidents, and fuel reports.
+   Merged from the separate "FDC Vehicle Management" app: same features, same data model, this app's look and login.
+   Data is kept in four collections of this Firebase project and goes through the same cloud-sync safety layer.
+===================================================================== */
+const VEH_TYPES = ['Motorcycle','Car','Doublecab','Pick Up','Van','Speed Boat'];
+const VEH_FUELS = ['Petrol','Diesel'];
+const VEH_STATUSES = ['Active','In service','Inactive'];
+const VEH_SERVICE_TYPES = ['General service','Oil change','Tyre change','Battery replacement','Brake service','Engine service','Hull / outboard service','Other'];
+const VEH_ISSUE_STATUSES = ['Open','In progress','Resolved'];
+const VEH_STATUTORY = [{ key:'annualFee', label:'Annual Fee' }, { key:'insurance', label:'Insurance' }, { key:'roadworthiness', label:'Roadworthiness' }];
+const VEH_DURATIONS = [['', 'Custom'], ['6', '6 months'], ['12', '1 year'], ['24', '2 years'], ['36', '3 years']];
+const VEH_FUND_TYPES = [['PR', 'PR (Purchase Requisition)'], ['Petty Cash', 'Petty Cash']];
+const VEH_COLS = {
+  vehicles:         { collection:'fdc_inventory_vehicles',           label:'vehicles',          one:'vehicle' },
+  fuelRecords:      { collection:'fdc_inventory_fuel_records',       label:'fuel entries',      one:'fuel entry' },
+  serviceRecords:   { collection:'fdc_inventory_service_records',    label:'service records',   one:'service record' },
+  fuelRequisitions: { collection:'fdc_inventory_fuel_requisitions',  label:'fuel requisitions', one:'fuel requisition' },
+};
+const vehRefs = {}, vehUnsubs = {};
+let vehSettingsUnsub = null;
+let vehSettings = { remindDays:30, currency:'MVR', spBase:'' };
+const vehUi = { q:'', ftype:'', ffuel:'', fstatus:'', fuelTab:'log', fuelQ:'', fuelVeh:'', fuelMonth:'', fuelFund:'', fuelReq:'', svcTab:'periodic', svcQ:'', svcVeh:'', repPreset:'6m', repFrom:'', repTo:'', repVeh:'', repGran:'' };
+Object.keys(VEH_COLS).forEach(k => {
+  state[k] = state[k] || [];
+  SYNC_GUARDED[k] = { one:VEH_COLS[k].one, label:VEH_COLS[k].label, collection:VEH_COLS[k].collection, ref:()=>vehRefs[k] || null, listen:()=>listenVeh(k) };
+});
+
+/* ---------- loading, clearing and cloud listeners ---------- */
+async function vehLoadCache(){
+  for(const k of Object.keys(VEH_COLS)) state[k] = (await getJSON(k, [])) || [];
+  const s = await getJSON('vehicleSettings', null);
+  if(s && typeof s === 'object') vehSettings = Object.assign(vehSettings, s);
+}
+function vehClearState(){
+  Object.keys(VEH_COLS).forEach(k => { state[k] = []; try{ localStorage.removeItem(STORAGE_PREFIX + k); }catch(e){} });
+}
+function listenVeh(key){
+  if(vehUnsubs[key]) vehUnsubs[key]();
+  vehUnsubs[key] = vehRefs[key].onSnapshot(snap => { applyCloudSnapshot(key, snap); renderApp(); }, err => syncListenerError(key, err));
+}
+function listenVehSettings(){
+  if(vehSettingsUnsub) vehSettingsUnsub();
+  vehSettingsUnsub = firestoreDb.collection('fdc_inventory_meta').doc('vehicleSettings').onSnapshot(doc => {
+    if(doc.exists){
+      vehSettings = Object.assign({ remindDays:30, currency:'MVR', spBase:'' }, doc.data());
+      setJSON('vehicleSettings', vehSettings);
+      renderApp();
+    }
+  }, err => handleCloudSyncError(err, 'vehicle settings'));
+}
+function startVehicleListeners(){
+  Object.keys(VEH_COLS).forEach(k => { vehRefs[k] = firestoreDb.collection(VEH_COLS[k].collection); listenVeh(k); });
+  listenVehSettings();
+}
+function stopVehicleListeners(){
+  stopPendingMembers();
+  Object.keys(VEH_COLS).forEach(k => { if(vehUnsubs[k]){ vehUnsubs[k](); vehUnsubs[k] = null; } vehRefs[k] = null; });
+  if(vehSettingsUnsub){ vehSettingsUnsub(); vehSettingsUnsub = null; }
+}
+
+/* ---------- saving ---------- */
+async function vehPersist(key, rec){
+  await setJSON(key, state[key]);
+  const ref = vehRefs[key];
+  if(ref){
+    try{ await ref.doc(rec.id).set(JSON.parse(JSON.stringify(rec))); markSynced(key, rec.id); }
+    catch(e){ toast(syncErrorMessage(e, VEH_COLS[key].collection, 'save'), true); scheduleUnsyncedCheck(); }
+  }
+  rerenderMain();                                                            // whatever page is showing reflects the change straight away
+}
+// add (no id) or update (id): an update keeps every field the form didn't touch. Returns the record id.
+async function vehSave(key, obj){
+  obj = Object.assign({}, obj);
+  let id = obj.id; delete obj.id;
+  const who = authUser ? authUser.name : '';
+  obj.updatedAt = Date.now(); obj.updatedBy = who;
+  let rec;
+  if(id){
+    const i = state[key].findIndex(x => x.id === id);
+    rec = Object.assign({}, i >= 0 ? state[key][i] : {}, obj, { id });
+    if(i >= 0) state[key][i] = rec; else state[key].push(rec);
+  } else {
+    id = uid(); obj.createdAt = Date.now(); obj.createdBy = who;
+    rec = Object.assign({}, obj, { id });
+    state[key].push(rec);
+  }
+  await vehPersist(key, rec);
+  return id;
+}
+async function vehDelete(key, id){
+  state[key] = state[key].filter(x => x.id !== id);
+  await setJSON(key, state[key]);
+  const ref = vehRefs[key];
+  if(ref){
+    try{ await ref.doc(id).delete(); forgetSynced(key, id); }
+    catch(e){ toast(syncErrorMessage(e, VEH_COLS[key].collection, 'delete'), true); }
+  }
+  rerenderMain();
+}
+async function persistVehSettings(){
+  await setJSON('vehicleSettings', vehSettings);
+  if(firestoreDb){
+    try{ await firestoreDb.collection('fdc_inventory_meta').doc('vehicleSettings').set(vehSettings); }
+    catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_meta (vehicleSettings doc)', 'save'), true); }
+  }
+}
+
+/* ---------- small helpers ---------- */
+const vNum = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+const vMoney = v => vehSettings.currency + ' ' + vNum(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+const vMoney0 = v => vehSettings.currency + ' ' + Math.round(vNum(v)).toLocaleString('en-US');
+const vSum = (a, k) => a.reduce((s, r) => s + vNum(r[k]), 0);
+const vFmtL = x => vNum(x).toLocaleString('en-US', { maximumFractionDigits:2 }) + ' L';
+const vFmtNum = (x, d) => vNum(x).toLocaleString('en-US', { minimumFractionDigits:d||0, maximumFractionDigits:d||0 });
+const vToday = () => localDateStr(new Date());
+const vDate = iso => iso ? fmtDate(iso) : '—';
+function vParse(s){ const p = String(s).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+function vIso(d){ const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10); }
+function vDaysUntil(iso){ const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((vParse(iso) - t) / 864e5); }
+function vAddMonths(iso, m){ const d = vParse(iso); d.setMonth(d.getMonth() + m); d.setDate(d.getDate() - 1); return vIso(d); }
+function vDuration(a, b){
+  if(!a || !b) return '—';
+  const days = Math.round((vParse(b) - vParse(a)) / 864e5) + 1;
+  if(days <= 0) return '—';
+  const months = Math.round(days / 30.44);
+  if(months >= 12 && months % 12 === 0) return (months / 12) + (months === 12 ? ' year' : ' years');
+  if(months >= 1) return months + (months === 1 ? ' month' : ' months');
+  return days + ' days';
+}
+function vExpiry(iso){
+  if(!iso) return { k:'', t:'Not set', d:null };
+  const d = vDaysUntil(iso);
+  if(d < 0) return { k:'crit', t:'Expired ' + (-d) + 'd ago', d };
+  if(d === 0) return { k:'crit', t:'Expires today', d };
+  if(d <= vehSettings.remindDays) return { k:'warn', t:'Expires in ' + d + 'd', d };
+  return { k:'good', t:'Valid', d };
+}
+const vehById = id => state.vehicles.find(v => v.id === id);
+const vLabel = v => v ? (v.plate || '—') : '(deleted vehicle)';
+const vName = v => v ? [v.make, v.model].filter(Boolean).join(' ') : '';
+const vSorted = () => state.vehicles.slice().sort((a, b) => String(a.plate || '').localeCompare(String(b.plate || '')));
+const vByDateDesc = (a, b) => String(b.date || '').localeCompare(String(a.date || ''));
+function vMatch(q, parts){
+  q = String(q || '').trim().toLowerCase(); if(!q) return true;
+  const hay = parts.map(x => x == null ? '' : String(x)).join(' ').toLowerCase();
+  return q.split(/\s+/).every(w => hay.indexOf(w) >= 0);
+}
+const vVehWords = id => { const v = vehById(id); return v ? [v.plate, v.make, v.model, v.type, v.assignedTo, v.department] : []; };
+const vDateWords = iso => iso ? [iso, fmtDate(iso)] : [];
+function vCleanLink(t){ t = String(t || '').trim(); const m = t.match(/https?:\/\/[^\s"'<>]+/i); return m ? m[0] : t.replace(/\s+/g, ' '); }
+// a stored link only becomes clickable when it is a web address
+function vSafeUrl(u){ const x = normalizeWebUrl(u); return x || ''; }
+
+/* ---------- fuel requisitions (PR / petty cash) ---------- */
+const vReqById = id => state.fuelRequisitions.find(r => r.id === id);
+const vFundShort = k => k === 'PR' ? 'PR' : 'Petty Cash';
+const vReqUsed = (rq, exclude) => state.fuelRecords.reduce((s, f) => f.requisitionId === rq.id && f.id !== exclude ? s + vNum(f.total) : s, 0);
+const vReqBalance = (rq, exclude) => Math.round((vNum(rq.amount) - vReqUsed(rq, exclude)) * 100) / 100;
+const vHasL = rq => vNum(rq.litres) > 0;                       // requisitions created before litres were tracked have no litre limit
+const vReqUsedL = (rq, exclude) => state.fuelRecords.reduce((s, f) => f.requisitionId === rq.id && f.id !== exclude ? s + vNum(f.litres) : s, 0);
+const vReqBalanceL = (rq, exclude) => Math.round((vNum(rq.litres) - vReqUsedL(rq, exclude)) * 100) / 100;
+function vReqPct(rq){
+  const a = vNum(rq.amount) ? vReqBalance(rq) / vNum(rq.amount) : 1, l = vHasL(rq) ? vReqBalanceL(rq) / vNum(rq.litres) : 1;
+  return Math.max(0, Math.min(1, a, l));
+}
+function vReqStatus(rq){
+  if(rq.closed) return { k:'', t:'Closed' };
+  if(vReqBalance(rq) <= 0 || (vHasL(rq) && vReqBalanceL(rq) <= 0)) return { k:'crit', t:'Limit reached' };
+  if(vReqPct(rq) < 0.2) return { k:'warn', t:'Low balance' };
+  return { k:'good', t:'Active' };
+}
+const vReqLabel = rq => (rq.kind === 'PR' ? 'PR ' : 'PC ') + (rq.refNo || '—');
+// requisitions that can still fund a fill for this vehicle + fuel type + funding type, oldest first
+function vUsableReqs(vehicleId, fuelType, kind, excludeFuelId, keepId){
+  return state.fuelRequisitions.filter(rq => {
+    if(rq.id === keepId) return true;
+    return !rq.closed && rq.vehicleId === vehicleId && rq.fuelType === fuelType && rq.kind === kind && vReqBalance(rq, excludeFuelId) > 0 && (!vHasL(rq) || vReqBalanceL(rq, excludeFuelId) > 0);
+  }).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+}
+function vReqHay(rq){ return vVehWords(rq.vehicleId).concat(vDateWords(rq.date), [rq.kind, rq.kind === 'Petty Cash' ? 'PC' : '', rq.refNo, rq.fuelType, rq.notes, vReqStatus(rq).t, vNum(rq.amount).toFixed(2)]); }
+function vFuelHay(r){ const rq = vReqById(r.requisitionId); return vVehWords(r.vehicleId).concat(vDateWords(r.date), [r.fuelType, r.fundType, r.fundType === 'Petty Cash' ? 'PC' : '', rq && rq.refNo, r.poNo, r.ref, r.station, r.filledBy, r.notes, vNum(r.total).toFixed(2), vNum(r.litres).toFixed(2)]); }
+function vSvcHay(r){ return vVehWords(r.vehicleId).concat(vDateWords(r.date), [r.serviceType, r.type, r.vendor, r.notes, r.issue, r.status, r.reportedBy, r.odometer, vNum(r.cost).toFixed(2), r.nextDate ? fmtDate(r.nextDate) : '']); }
+
+/* ---------- alerts: expiring / expired documents, services due, requisitions used up or running low ---------- */
+function vehReqAlerts(){
+  const out = [];
+  state.fuelRequisitions.forEach(rq => {
+    if(rq.closed) return;
+    const st = vReqStatus(rq), word = rq.kind === 'PR' ? 'PR' : 'Petty cash';
+    if(st.k === 'crit'){
+      if(vUsableReqs(rq.vehicleId, rq.fuelType, rq.kind).length) return;     // a newer requisition already covers this vehicle
+      out.push({ v:vehById(rq.vehicleId), reqId:rq.id, s:{ label: word + ' ' + rq.refNo + ' balance depleted' }, note:'add a new ' + (rq.kind === 'PR' ? 'PR' : 'petty cash requisition'), st:{ k:'crit', t:'Balance depleted', d:-1 } });
+    } else if(st.k === 'warn'){
+      out.push({ v:vehById(rq.vehicleId), reqId:rq.id, s:{ label: word + ' ' + rq.refNo + ' low balance' }, note: vMoney(Math.max(0, vReqBalance(rq))) + (vHasL(rq) ? ' · ' + vFmtL(Math.max(0, vReqBalanceL(rq))) : '') + ' left', st:{ k:'warn', t:'Low balance', d:1 } });
+    }
+  });
+  return out;
+}
+function vehAlerts(){
+  let out = [];
+  state.vehicles.forEach(v => VEH_STATUTORY.forEach(s => {
+    const x = v[s.key]; if(!x || !x.expiry) return;
+    const st = vExpiry(x.expiry);
+    if(st.k === 'warn' || st.k === 'crit') out.push({ v, s, st, exp:x.expiry, cost:x.cost });
+  }));
+  state.serviceRecords.forEach(r => {
+    if(r.kind === 'incident' || !r.nextDate) return;
+    const later = state.serviceRecords.some(o => o !== r && o.kind !== 'incident' && o.vehicleId === r.vehicleId && (o.date || '') > (r.date || ''));
+    if(later) return;                                                        // a newer service already covers this one
+    let st = vExpiry(r.nextDate);
+    if(st.k === 'warn' || st.k === 'crit'){
+      st = Object.assign({}, st, { t: st.d < 0 ? 'Overdue ' + (-st.d) + 'd' : st.d === 0 ? 'Due today' : 'Due in ' + st.d + 'd' });
+      out.push({ v:vehById(r.vehicleId), s:{ label:'Periodic service' }, st, exp:r.nextDate });
+    }
+  });
+  out = out.concat(vehReqAlerts());
+  return out.sort((a, b) => a.st.d - b.st.d);
+}
+function vehMaybeNotify(alerts){
+  if(!('Notification' in window) || Notification.permission !== 'granted' || !alerts.length) return;
+  const key = 'fdc_veh_notified_' + vToday();
+  try{ if(localStorage.getItem(key)) return; }catch(e){}
+  const exp = alerts.filter(a => a.st.k === 'crit').length, dep = alerts.filter(a => a.reqId && a.st.k === 'crit').length;
+  new Notification('FDC — Vehicles', { body:(dep ? dep + ' PR / petty cash balance' + (dep > 1 ? 's' : '') + ' depleted. ' : '') + (exp ? exp + ' expired / overdue, ' : '') + (alerts.length - exp) + ' expiring within ' + vehSettings.remindDays + ' days. Open the app to review.' });
+  try{ localStorage.setItem(key, '1'); }catch(e){}
+}
+let vehNotifiedOnce = false;
+function vehAfterRender(){
+  vehWireReports();
+  if(!vehNotifiedOnce && authUser && state.vehicles.length){ vehNotifiedOnce = true; vehMaybeNotify(vehAlerts()); }
+}
+
+/* ---------- fuel report data ---------- */
+const VEH_FUEL_SERIES = [{ key:'Petrol', color:'#f59e0b' }, { key:'Diesel', color:'#6366f1' }];
+function vRepPresetRange(p){
+  const t = new Date(); t.setHours(0, 0, 0, 0); let to = vIso(t), from;
+  if(p === 'month') from = vIso(new Date(t.getFullYear(), t.getMonth(), 1));
+  else if(p === '3m') from = vIso(new Date(t.getFullYear(), t.getMonth() - 2, 1));
+  else if(p === '6m') from = vIso(new Date(t.getFullYear(), t.getMonth() - 5, 1));
+  else if(p === 'year') from = vIso(new Date(t.getFullYear(), 0, 1));
+  else { const ds = state.fuelRecords.map(r => r.date).filter(Boolean).sort(); from = ds[0] || vIso(new Date(t.getFullYear(), 0, 1)); if(ds.length && ds[ds.length - 1] > to) to = ds[ds.length - 1]; }
+  return { from, to };
+}
+function vRepRange(){
+  if(!vehUi.repFrom || !vehUi.repTo){ const r = vRepPresetRange(vehUi.repPreset || '6m'); vehUi.repFrom = vehUi.repFrom || r.from; vehUi.repTo = vehUi.repTo || r.to; }
+  let f = vehUi.repFrom, t = vehUi.repTo; if(f > t){ const x = f; f = t; t = x; }
+  return { from:f, to:t };
+}
+function vRepGran(from, to){
+  if(vehUi.repGran) return vehUi.repGran;
+  const days = (vParse(to) - vParse(from)) / 864e5;
+  return days <= 45 ? 'day' : days <= 120 ? 'week' : 'month';
+}
+function vBucketKey(iso, g){
+  if(g === 'month') return iso.slice(0, 7);
+  if(g === 'week'){ const d = vParse(iso), w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return vIso(d); }
+  return iso;
+}
+function vBucketList(from, to, g){
+  const out = [], end = vParse(to); let d = vParse(g === 'month' ? from.slice(0, 7) + '-01' : vBucketKey(from, g)), guard = 0;
+  while(d <= end && guard++ < 2000){
+    out.push(g === 'month' ? vIso(d).slice(0, 7) : vIso(d));
+    if(g === 'month') d = new Date(d.getFullYear(), d.getMonth() + 1, 1); else d.setDate(d.getDate() + (g === 'week' ? 7 : 1));
+  }
+  return out;
+}
+function vBucketLabel(k, g, long){
+  if(g === 'month') return vParse(k + '-01').toLocaleDateString('en-GB', { month:'short', year: long ? 'numeric' : '2-digit' });
+  const s = vParse(k).toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+  if(g === 'week') return long ? 'Week of ' + s + ' ' + k.slice(0, 4) : s;
+  return long ? vParse(k).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' }) : s;
+}
+function vRepData(){
+  const rg = vRepRange(), g = vRepGran(rg.from, rg.to);
+  const recs = state.fuelRecords.filter(r => r.date && r.date >= rg.from && r.date <= rg.to && (!vehUi.repVeh || r.vehicleId === vehUi.repVeh) && (r.fuelType === 'Petrol' || r.fuelType === 'Diesel'));
+  const keys = vBucketList(rg.from, rg.to, g), idx = {}; keys.forEach((k, i) => { idx[k] = i; });
+  const rows = keys.map(k => ({ k, Petrol:{ l:0, c:0 }, Diesel:{ l:0, c:0 } }));
+  const tot = { Petrol:{ l:0, c:0, n:0 }, Diesel:{ l:0, c:0, n:0 } }, byVeh = {};
+  recs.forEach(r => {
+    const i = idx[vBucketKey(r.date, g)], ft = r.fuelType;
+    if(i != null){ rows[i][ft].l += vNum(r.litres); rows[i][ft].c += vNum(r.total); }
+    tot[ft].l += vNum(r.litres); tot[ft].c += vNum(r.total); tot[ft].n++;
+    const bv = byVeh[r.vehicleId] = byVeh[r.vehicleId] || { l:0, c:0, n:0, ft }; bv.l += vNum(r.litres); bv.c += vNum(r.total); bv.n++;
+  });
+  return { from:rg.from, to:rg.to, g, recs, rows, tot, byVeh };
+}
+
+/* ---------- shared pieces (same look as the rest of the app) ---------- */
+const VEH_PILL = { '':'bg-slate-100 text-slate-600', good:'bg-emerald-100 text-emerald-700', warn:'bg-amber-100 text-amber-700', crit:'bg-rose-100 text-rose-700', acc:'bg-brand-50 text-brand-700' };
+const VEH_DOT = { '':'bg-slate-300', good:'bg-emerald-500', warn:'bg-amber-500', crit:'bg-rose-500' };
+const vPill = (k, t, extra) => `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${VEH_PILL[k] || VEH_PILL['']} ${extra || ''}">${t}</span>`;
+const vDot = k => `<span class="w-2 h-2 rounded-full shrink-0 ${VEH_DOT[k] || VEH_DOT['']}"></span>`;
+const VEH_BTN = 'inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold';
+const vBtnPrimary = (label, onclick) => `<button onclick="${onclick}" class="${VEH_BTN} bg-brand-600 text-white hover:bg-brand-700 shadow-sm">${label}</button>`;
+const vBtnPlain = (label, onclick) => `<button onclick="${onclick}" class="${VEH_BTN} border border-slate-300 text-slate-700 hover:bg-slate-50">${label}</button>`;
+const VEH_INPUT = 'px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
+const VEH_TH = 'py-3 font-semibold';
+const vBar = rq => { const st = vReqStatus(rq); return `<div class="vh-bar ${st.k}" title="${Math.round(vReqPct(rq) * 100)}% left"><i style="width:${(vReqPct(rq) * 100).toFixed(1)}%"></i></div>`; };
+function vLink(url, label){
+  const u = vSafeUrl(url);
+  return u ? `<a href="${esc(u)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="text-xs font-semibold text-brand-600 hover:underline">${esc(label || 'Open document')} ↗</a>` : '<span class="text-xs text-slate-400">No document linked</span>';
+}
+function vHead(title, sub, actions){
+  return `<div class="flex items-start justify-between gap-4 flex-wrap mb-6"><div><h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">${title}</h1><p class="text-sm text-slate-500 mt-0.5">${sub}</p></div><div class="flex gap-2.5 flex-wrap">${actions || ''}</div></div>`;
+}
+const vKpis = html => `<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">${html}</div>`;
+const vPanel = (title, hint, body) => `<div class="bg-white rounded-xl border border-slate-200 mb-6"><div class="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-baseline justify-between gap-3 flex-wrap"><h2 class="text-sm font-bold text-slate-900">${title}</h2>${hint ? `<span class="text-xs text-slate-400">${hint}</span>` : ''}</div>${body}</div>`;
+const vEmpty = msg => `<div class="text-center py-12 px-6 text-sm text-slate-500">${msg}</div>`;
+const vTableWrap = inner => `<div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6"><div class="overflow-x-auto">${inner}</div></div>`;
+const vTHead = cols => `<thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">${cols.map((c, i) => `<th class="${VEH_TH} ${i === 0 ? 'pl-5 sm:pl-6' : ''} ${i === cols.length - 1 ? 'pr-5 sm:pr-6' : 'pr-3'} ${c.n ? 'text-right' : ''}">${c.t}</th>`).join('')}</tr></thead>`;
+const vTr = 'border-b border-slate-100 last:border-0 hover:bg-slate-50';
+const vTd = (inner, o) => `<td class="py-3 ${o && o.first ? 'pl-5 sm:pl-6' : ''} ${o && o.last ? 'pr-5 sm:pr-6' : 'pr-3'} ${o && o.n ? 'text-right num whitespace-nowrap' : ''} ${o && o.cls || ''}">${inner}</td>`;
+const vVehCell = v => `<div class="font-bold text-slate-800">${esc(vLabel(v))}</div><div class="text-[11.5px] text-slate-400">${esc(vName(v))}</div>`;
+function vTypeIcon(t){
+  const boat = t === 'Speed Boat', moto = t === 'Motorcycle';
+  const p = boat ? '<path d="M6 30h52l-8 10H14z"/><path d="M22 30V18h16l8 12"/>' : moto ? '<circle cx="16" cy="34" r="8"/><circle cx="48" cy="34" r="8"/><path d="M16 34l10-14h12l10 14M30 20l-4-6h-6"/>' : '<path d="M8 34V26l6-10h30l10 10h4v8z"/><circle cx="18" cy="36" r="5"/><circle cx="46" cy="36" r="5"/>';
+  return `<svg width="72" height="50" viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">${p}</svg>`;
+}
+function vNotFound(what, back, label){
+  return `<div class="text-center py-16 px-6"><h3 class="text-base font-semibold text-slate-800 mb-1">${what} not found</h3><p class="text-sm text-slate-500 max-w-sm mx-auto mb-4">It may have been deleted.</p><button onclick="goTo('${back}')" class="inline-flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">← Back to ${label}</button></div>`;
+}
+function vehSet(k, val){ vehUi[k] = val; if(k === 'repFrom' || k === 'repTo') vehUi.repPreset = ''; rerenderMain(); }
+function vSelect(k, list, sel, blank, extra){
+  return `<select onchange="vehSet('${k}', this.value)" class="${VEH_INPUT} ${extra || ''}">${blank != null ? `<option value="">${esc(blank)}</option>` : ''}${list.map(o => { const v = Array.isArray(o) ? o[0] : o, l = Array.isArray(o) ? o[1] : o; return `<option value="${esc(v)}" ${String(sel) === String(v) ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`;
+}
+const vVehSelect = (k, sel) => vSelect(k, vSorted().map(v => [v.id, v.plate + (vName(v) ? ' — ' + vName(v) : '')]), sel, 'All vehicles');
+function vTabs(items, cur, fnName){
+  return `<div class="inline-flex max-w-full overflow-x-auto rounded-lg bg-slate-100 p-1 gap-1">${items.map(([id, label]) => `<button onclick="${fnName}('${id}')" class="px-3.5 py-1.5 rounded-md text-[13px] font-semibold whitespace-nowrap ${cur === id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}">${label}</button>`).join('')}</div>`;
+}
+const vSearch = (id, k, ph) => `<input id="${id}" type="search" value="${esc(vehUi[k])}" oninput="vehSet('${k}', this.value)" placeholder="${esc(ph)}" class="${VEH_INPUT} flex-1 min-w-[12rem]">`;
+function openVehicle(id){ ui.selectedVehicleId = id; goTo('vehicle-detail'); }
+
+/* ---------- Vehicles ---------- */
+function viewVehicles(){
+  const alerts = vehAlerts(), vs = state.vehicles, admin = canManageInventory();
+  let expired = 0, expiring = 0, annual = 0;
+  vs.forEach(v => VEH_STATUTORY.forEach(s => { const x = v[s.key] || {}; annual += vNum(x.cost); const st = vExpiry(x.expiry); if(st.k === 'crit') expired++; else if(st.k === 'warn') expiring++; }));
+  const list = vSorted().filter(v => {
+    if(vehUi.ftype && v.type !== vehUi.ftype) return false;
+    if(vehUi.ffuel && v.fuelType !== vehUi.ffuel) return false;
+    if(vehUi.fstatus && (v.status || 'Active') !== vehUi.fstatus) return false;
+    return vMatch(vehUi.q, [v.plate, v.make, v.model, v.assignedTo, v.department, v.type, v.chassisNo]);
+  });
+  const attention = !alerts.length ? vEmpty('Nothing due. All statutory documents are valid.') : `<ul>${alerts.map(a => `
+    <li><button onclick="${a.reqId ? `vehOpenReqView('${a.reqId}')` : `openVehicle('${a.v ? a.v.id : ''}')`}" class="w-full text-left flex items-center gap-3 px-5 sm:px-6 py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50">
+      ${vDot(a.st.k)}<div class="flex-1 min-w-0 text-sm"><span class="font-bold text-slate-800">${esc(vLabel(a.v))}</span> <span class="text-slate-600">· ${esc(a.s.label)}</span> <span class="text-slate-400 text-xs">(${esc(a.note || vDate(a.exp))})</span></div>
+      ${vPill(a.st.k, esc(a.st.t))}</button></li>`).join('')}</ul>`;
+  const cards = list.map(v => {
+    const stat = VEH_STATUTORY.map(s => { const st = vExpiry((v[s.key] || {}).expiry); return `<span title="${esc(s.label + ': ' + st.t)}" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${VEH_PILL[st.k] || VEH_PILL['']}">${vDot(st.k)}${esc(s.label)}</span>`; }).join('');
+    return `<button onclick="openVehicle('${v.id}')" class="text-left bg-white rounded-xl border border-slate-200 overflow-hidden hover:border-brand-500 hover:shadow-sm transition">
+      <div class="h-36 bg-slate-100 flex items-center justify-center text-slate-400 overflow-hidden">${v.image ? `<img src="${esc(v.image)}" alt="" class="w-full h-full object-cover">` : vTypeIcon(v.type)}</div>
+      <div class="p-4">
+        <div class="flex items-center justify-between gap-2"><span class="text-[15px] font-extrabold tracking-wide text-slate-900">${esc(v.plate || '—')}</span>${vPill('', esc(v.status || 'Active'))}</div>
+        <div class="text-sm text-slate-600 mt-0.5">${esc(vName(v) || '—')}${v.year ? ' · ' + esc(v.year) : ''}</div>
+        <div class="flex items-center gap-1.5 flex-wrap mt-2">${vPill('acc', esc(v.type || '—'))}${v.fuelType ? vPill('', esc(v.fuelType)) : ''}${v.assignedTo ? `<span class="text-xs text-slate-400">${esc(v.assignedTo)}</span>` : ''}</div>
+        <div class="flex flex-wrap gap-1.5 mt-3">${stat}</div>
+      </div></button>`;
+  }).join('');
+  return `
+    ${vHead('Vehicles', 'All corporate vehicles, statutory documents and renewal dates.',
+      (admin ? vBtnPlain('Settings', 'openVehSettings()') + vBtnPrimary('+ Add Vehicle', 'openVehicleForm()') : ''))}
+    ${vKpis(
+      statCard('Total vehicles', fmtNum(vs.length), vs.filter(v => (v.status || 'Active') === 'Active').length + ' active', 'brand') +
+      statCard('Expired documents', fmtNum(expired), 'Annual fee, insurance, roadworthiness', expired ? 'rose' : 'slate') +
+      statCard('Expiring ≤ ' + vehSettings.remindDays + ' days', fmtNum(expiring), 'Renew soon', expiring ? 'amber' : 'slate') +
+      statCard('Statutory cost (current)', vMoney0(annual), 'Sum of latest renewal costs', 'emerald'))}
+    ${vPanel('Needs attention', 'Items expiring within ' + vehSettings.remindDays + ' days or already expired' + (('Notification' in window) && Notification.permission === 'default' ? ` · <button onclick="vehEnableNotif()" class="font-semibold text-brand-600 hover:underline">Enable desktop reminders</button>` : ''), attention)}
+    <div class="flex flex-wrap gap-2.5 mb-5">
+      ${vSearch('veh-q', 'q', 'Search plate, make, model, driver…')}
+      ${vSelect('ftype', VEH_TYPES, vehUi.ftype, 'All types')}${vSelect('ffuel', VEH_FUELS, vehUi.ffuel, 'All fuel')}${vSelect('fstatus', VEH_STATUSES, vehUi.fstatus, 'All status')}
+    </div>
+    ${!vs.length ? `<div class="bg-white rounded-xl border border-slate-200">${vEmpty('No vehicles yet.' + (admin ? `<div class="mt-4 flex gap-2.5 justify-center flex-wrap">${vBtnPrimary('+ Add your first vehicle', 'openVehicleForm()')}${vBtnPlain('Import from the old Vehicle Management app', 'openVehMigration()')}</div>` : ''))}</div>`
+      : !list.length ? `<div class="bg-white rounded-xl border border-slate-200">${vEmpty('No vehicles match these filters.')}</div>`
+      : `<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">${cards}</div>`}`;
+}
+
+/* ---------- one vehicle ---------- */
+function vSpec(l, val){ return `<div class="min-w-0"><div class="text-[11px] text-slate-400">${l}</div><div class="text-sm text-slate-800 font-medium break-all">${esc(val || '—')}</div></div>`; }
+function vStatCard(v, s){
+  const x = v[s.key] || {}, st = vExpiry(x.expiry), admin = canManageInventory();
+  const hist = (x.history || []).map(h => `<tr class="border-t border-slate-100"><td class="py-1.5 pr-3">${vDate(h.start)}</td><td class="py-1.5 pr-3">${vDate(h.expiry)}</td><td class="py-1.5 text-right num">${h.cost ? vMoney(h.cost) : '—'}</td></tr>`).join('');
+  return `<div class="bg-white rounded-xl border ${st.k === 'crit' ? 'border-rose-300' : st.k === 'warn' ? 'border-amber-300' : 'border-slate-200'} p-5">
+    <div class="flex items-center justify-between gap-2"><h3 class="text-sm font-bold text-slate-900">${s.label}</h3>${vPill(st.k, esc(st.t))}</div>
+    ${s.key === 'insurance' && (x.provider || x.policyNo) ? `<div class="text-xs text-slate-500 mt-1">${esc([x.provider, x.policyNo && ('Policy ' + x.policyNo)].filter(Boolean).join(' · '))}</div>` : ''}
+    <div class="grid grid-cols-2 gap-3 mt-3">${vSpec('Start', vDate(x.start))}${vSpec('Expiry', vDate(x.expiry))}${vSpec('Duration', vDuration(x.start, x.expiry))}${vSpec('Cost', x.cost ? vMoney(x.cost) : '—')}</div>
+    <div class="flex items-center justify-between gap-2 mt-3">${vLink(x.docUrl)}<button onclick="openVehRenew('${v.id}','${s.key}')" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Renew</button></div>
+    ${hist ? `<details class="mt-3"><summary class="text-xs text-slate-500 cursor-pointer">Previous terms (${x.history.length})</summary><table class="w-full text-xs mt-2"><thead><tr class="text-left text-slate-400"><th class="py-1 pr-3 font-semibold">Start</th><th class="py-1 pr-3 font-semibold">Expiry</th><th class="py-1 text-right font-semibold">Cost</th></tr></thead><tbody>${hist}</tbody></table></details>` : ''}
+  </div>`;
+}
+function viewVehicleDetail(){
+  const v = vehById(ui.selectedVehicleId);
+  if(!v) return vNotFound('Vehicle', 'vehicles', 'Vehicles');
+  const admin = canManageInventory(), reg = v.registry || {};
+  const fuel = state.fuelRecords.filter(r => r.vehicleId === v.id).sort(vByDateDesc);
+  const svc = state.serviceRecords.filter(r => r.vehicleId === v.id).sort(vByDateDesc);
+  const reqs = state.fuelRequisitions.filter(r => r.vehicleId === v.id && !r.closed).sort(vByDateDesc);
+  const reqBody = reqs.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Type' }, { t:'Ref no.' }, { t:'Fuel' }, { t:'Value', n:1 }, { t:'Balance', n:1 }, { t:'Balance (L)', n:1 }, { t:'Status' }])}<tbody>${reqs.map(rq => { const st = vReqStatus(rq); return `
+    <tr class="${vTr} cursor-pointer" onclick="vehOpenReqView('${rq.id}')">${vTd(vPill(rq.kind === 'PR' ? 'acc' : '', vFundShort(rq.kind)), { first:1 })}${vTd(`<span class="font-semibold">${esc(rq.refNo || '—')}</span>`)}${vTd(esc(rq.fuelType || '—'))}${vTd(vMoney(rq.amount), { n:1 })}${vTd(`<b>${vMoney(Math.max(0, vReqBalance(rq)))}</b>`, { n:1 })}${vTd(vHasL(rq) ? vFmtL(Math.max(0, vReqBalanceL(rq))) : '—', { n:1 })}${vTd(vPill(st.k, st.t), { last:1 })}</tr>`; }).join('')}</tbody></table></div>` : vEmpty('No active PR or petty cash requisition for this vehicle.');
+  const fuelBody = fuel.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Date' }, { t:'Litres', n:1 }, { t:'Cost', n:1 }, { t:'Odometer', n:1 }])}<tbody>${fuel.slice(0, 5).map(r => `<tr class="${vTr}">${vTd(vDate(r.date), { first:1 })}${vTd(vNum(r.litres).toFixed(2), { n:1 })}${vTd(vMoney(r.total), { n:1 })}${vTd(r.odometer ? vNum(r.odometer).toLocaleString() : '—', { n:1, last:1 })}</tr>`).join('')}</tbody></table></div>` : vEmpty('No fuel entries yet.');
+  const svcBody = svc.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Date' }, { t:'Kind' }, { t:'Detail' }, { t:'Cost', n:1 }])}<tbody>${svc.slice(0, 6).map(r => { const inc = r.kind === 'incident'; return `<tr class="${vTr}">${vTd(vDate(r.date), { first:1 })}${vTd(vPill(inc ? 'warn' : '', inc ? 'Issue' : 'Service'))}${vTd(esc(inc ? r.issue : (r.serviceType || r.type || '—')), { cls:'max-w-[16rem] truncate' })}${vTd(r.cost ? vMoney(r.cost) : '—', { n:1, last:1 })}</tr>`; }).join('')}</tbody></table></div>` : vEmpty('No service records yet.');
+  return `
+    <button onclick="goTo('vehicles')" class="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 hover:underline mb-4">← Back to Vehicles</button>
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-6">
+      <div class="flex items-start gap-4">
+        <div class="w-32 h-32 rounded-xl border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400 overflow-hidden shrink-0 ${v.image ? 'cursor-zoom-in' : ''}" ${v.image ? `onclick="vehZoomPhoto('${v.id}')" title="Click to view full size"` : ''}>${v.image ? `<img src="${esc(v.image)}" alt="Vehicle photo" class="w-full h-full object-cover">` : vTypeIcon(v.type)}</div>
+        <div>
+          <div class="flex items-center gap-2.5 mb-1 flex-wrap"><h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">${esc(v.plate || '—')}</h1>${vPill('', esc(v.status || 'Active'))}</div>
+          <div class="text-sm text-slate-500">${esc(vName(v) || '—')}${v.year ? ' · ' + esc(v.year) : ''}</div>
+          <div class="flex items-center gap-1.5 flex-wrap mt-2">${vPill('acc', esc(v.type || '—'))}${v.fuelType ? vPill('', esc(v.fuelType)) : ''}</div>
+        </div>
+      </div>
+      <div class="flex gap-2.5">${vBtnPlain('Edit', `openVehicleForm('${v.id}')`)}${admin ? `<button onclick="vehConfirmDelete('${v.id}')" class="${VEH_BTN} text-rose-600 hover:bg-rose-50">Delete</button>` : ''}</div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+      <div class="space-y-4">
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <h3 class="text-sm font-bold text-slate-900 mb-3">Details</h3>
+          <div class="grid grid-cols-2 gap-3">${vSpec('Colour', v.color)}${vSpec('Odometer', v.mileage ? vNum(v.mileage).toLocaleString() + ' km' : '')}${vSpec('Assigned to', v.assignedTo)}${vSpec('Department', v.department)}${vSpec('Chassis / hull no.', v.chassisNo)}${vSpec('Engine no.', v.engineNo)}</div>
+          <div class="mt-3">${v.spFolder && vSafeUrl(v.spFolder) ? `<a href="${esc(vSafeUrl(v.spFolder))}" target="_blank" rel="noopener" class="inline-flex px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Open SharePoint documents folder ↗</a>` : '<span class="text-xs text-slate-400">No SharePoint folder linked — edit the vehicle to add one.</span>'}</div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <h3 class="text-sm font-bold text-slate-900 mb-3">Vehicle registry</h3>
+          <div class="grid grid-cols-2 gap-3">${vSpec('Registration no.', v.plate)}${vSpec('Registered', vDate(reg.date))}${vSpec('Owner', reg.owner)}${vSpec('Certificate', reg.certNo)}</div>
+          <div class="mt-3">${vLink(reg.docUrl, 'Registry document')}</div>
+        </div>
+        ${v.notes ? `<div class="bg-white rounded-xl border border-slate-200 p-5"><h3 class="text-sm font-bold text-slate-900 mb-2">Notes</h3><div class="text-sm text-slate-600 whitespace-pre-wrap">${esc(v.notes)}</div></div>` : ''}
+      </div>
+      <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 content-start">${VEH_STATUTORY.map(s => vStatCard(v, s)).join('')}</div>
+    </div>
+    ${vPanel('Fuel funding (PR / Petty Cash)', admin ? `<button onclick="openVehReqForm(null,{vehicleId:'${v.id}'})" class="text-xs font-semibold text-brand-600 hover:underline">+ Add requisition</button>` : '', reqBody)}
+    ${vPanel('Recent fueling', fuel.length > 5 ? `<button onclick="vehUi.fuelVeh='${v.id}';vehUi.fuelTab='log';goTo('fueling')" class="text-xs font-semibold text-brand-600 hover:underline">View all ${fuel.length}</button>` : '', fuelBody)}
+    ${vPanel('Recent servicing', svc.length > 6 ? `<button onclick="vehUi.svcVeh='${v.id}';goTo('servicing')" class="text-xs font-semibold text-brand-600 hover:underline">View all ${svc.length}</button>` : '', svcBody)}`;
+}
+function vehZoomPhoto(id){ const v = vehById(id); if(v && v.image) openModal((v.plate || 'Vehicle') + ' — photo', `<img src="${esc(v.image)}" alt="Vehicle photo" class="w-full rounded-lg">`, true); }
+
+/* ---------- Fueling ---------- */
+function vehFuelTab(t){ vehUi.fuelTab = t; if(t === 'req') vehUi.fuelReq = ''; rerenderMain(); }
+function vehShowReqEntries(id){ vehUi.fuelReq = id; vehUi.fuelTab = 'log'; vehUi.fuelMonth = ''; rerenderMain(); }
+function viewFueling(){
+  const tab = vehUi.fuelTab, admin = canManageInventory();
+  const all = state.fuelRecords.slice().sort(vByDateDesc), reqs = state.fuelRequisitions.slice().sort(vByDateDesc);
+  const mon = vToday().slice(0, 7), thisM = all.filter(r => String(r.date || '').slice(0, 7) === mon);
+  const L = vSum(thisM, 'litres'), C = vSum(thisM, 'total');
+  const usable = r => { const k = vReqStatus(r).k; return k === 'good' || k === 'warn'; };
+  const avail = kind => reqs.filter(r => r.kind === kind && usable(r)).reduce((s, r) => s + Math.max(0, vReqBalance(r)), 0);
+  const availL = kind => reqs.filter(r => r.kind === kind && usable(r) && vHasL(r)).reduce((s, r) => s + Math.max(0, vReqBalanceL(r)), 0);
+  const cnt = kind => reqs.filter(r => r.kind === kind && usable(r)).length;
+  const ra = vehReqAlerts();
+  const alerts = !ra.length ? '' : vPanel('Requisitions needing attention', 'Depleted balances and balances under 20%', `<ul>${ra.map(a => `
+    <li><button onclick="vehOpenReqView('${a.reqId}')" class="w-full text-left flex items-center gap-3 px-5 sm:px-6 py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50">${vDot(a.st.k)}<div class="flex-1 min-w-0 text-sm"><span class="font-bold text-slate-800">${esc(vLabel(a.v))}</span> <span class="text-slate-600">· ${esc(a.s.label)}</span> <span class="text-slate-400 text-xs">(${esc(a.note)})</span></div>${vPill(a.st.k, esc(a.st.t))}</button></li>`).join('')}</ul>`);
+  let toolbar = `<div class="flex flex-wrap items-center gap-2.5 mb-4">${vTabs([['log', 'Fuel log (' + all.length + ')'], ['req', 'Requisitions (' + reqs.length + ')']], tab, 'vehFuelTab')}
+    ${vSearch('fuel-q', 'fuelQ', tab === 'log' ? 'Search plate, PR / PO no., station, delivery note…' : 'Search PR / petty cash no., plate, notes…')}
+    ${vVehSelect('fuelVeh', vehUi.fuelVeh)}${vSelect('fuelFund', VEH_FUND_TYPES, vehUi.fuelFund, 'PR & Petty Cash')}`;
+  let body;
+  if(tab === 'log'){
+    const months = Array.from(new Set(all.map(r => String(r.date || '').slice(0, 7)).filter(Boolean))).sort().reverse();
+    toolbar += vSelect('fuelMonth', months.map(m => [m, vParse(m + '-01').toLocaleDateString('en-GB', { month:'long', year:'numeric' })]), vehUi.fuelMonth, 'All months') + '</div>';
+    const list = all.filter(r => vMatch(vehUi.fuelQ, vFuelHay(r)) && (!vehUi.fuelVeh || r.vehicleId === vehUi.fuelVeh) && (!vehUi.fuelMonth || String(r.date || '').slice(0, 7) === vehUi.fuelMonth) && (!vehUi.fuelFund || r.fundType === vehUi.fuelFund) && (!vehUi.fuelReq || r.requisitionId === vehUi.fuelReq));
+    const fr = vehUi.fuelReq ? vReqById(vehUi.fuelReq) : null;
+    const filterNote = vehUi.fuelReq ? `<div class="flex items-center gap-2.5 mb-4">${vPill('acc', 'Showing entries for ' + esc(fr ? vReqLabel(fr) : 'requisition'))}<button onclick="vehSet('fuelReq','')" class="text-xs font-semibold text-brand-600 hover:underline">Show all</button></div>` : '';
+    body = filterNote + (list.length ? vTableWrap(`<table class="w-full text-sm">${vTHead([{ t:'Date' }, { t:'Vehicle' }, { t:'Fuel' }, { t:'Funding' }, { t:'Litres', n:1 }, { t:'Rate', n:1 }, { t:'Total', n:1 }, { t:'Odometer', n:1 }, { t:'Station' }, { t:'' }])}<tbody>${list.map(r => { const v = vehById(r.vehicleId), rq = vReqById(r.requisitionId); return `
+      <tr class="${vTr}">${vTd(vDate(r.date), { first:1 })}${vTd(vVehCell(v))}${vTd(esc(r.fuelType || '—'))}
+        ${vTd(r.fundType ? `${vPill(r.fundType === 'PR' ? 'acc' : '', esc(vFundShort(r.fundType)))} <span class="font-semibold text-xs">${esc(rq ? rq.refNo : '')}</span><div class="text-[11.5px] text-slate-400">${r.poNo ? esc((r.fundType === 'PR' ? 'PO ' : 'Voucher ') + r.poNo) : ''}</div>` : '<span class="text-slate-400">—</span>')}
+        ${vTd(vNum(r.litres).toFixed(2), { n:1 })}${vTd(r.rate ? vMoney(r.rate) : '—', { n:1 })}${vTd(`<b>${vMoney(r.total)}</b>`, { n:1 })}${vTd(r.odometer ? vNum(r.odometer).toLocaleString() : '—', { n:1 })}${vTd(esc(r.station || '—'))}
+        ${vTd(`<button onclick="openVehFuelView('${r.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">View</button><button onclick="openVehFuelForm('${r.id}')" class="text-xs font-semibold text-brand-600 hover:underline">Edit</button>`, { last:1, cls:'whitespace-nowrap text-right' })}</tr>`; }).join('')}
+      <tr class="bg-slate-50"><td colspan="4" class="py-3 pl-5 sm:pl-6 text-sm"><b>Total</b> <span class="text-xs text-slate-400">(${list.length} entries)</span></td><td class="py-3 pr-3 text-right num"><b>${vSum(list, 'litres').toFixed(2)}</b></td><td></td><td class="py-3 pr-3 text-right num"><b>${vMoney(vSum(list, 'total'))}</b></td><td colspan="3"></td></tr></tbody></table>`)
+      : `<div class="bg-white rounded-xl border border-slate-200">${vEmpty(all.length ? 'No entries match these filters.' : 'No fuel entries yet. Add a PR or Petty Cash requisition for a vehicle first, then log fuel against it.')}</div>`);
+  } else {
+    toolbar += '</div>';
+    const rl = reqs.filter(r => vMatch(vehUi.fuelQ, vReqHay(r)) && (!vehUi.fuelVeh || r.vehicleId === vehUi.fuelVeh) && (!vehUi.fuelFund || r.kind === vehUi.fuelFund));
+    body = rl.length ? vTableWrap(`<table class="w-full text-sm">${vTHead([{ t:'Type' }, { t:'Ref no.' }, { t:'Vehicle' }, { t:'Fuel' }, { t:'Date' }, { t:'Value / Litres', n:1 }, { t:'Used', n:1 }, { t:'Balance', n:1 }, { t:'Status' }, { t:'' }])}<tbody>${rl.map(rq => {
+      const v = vehById(rq.vehicleId), st = vReqStatus(rq), n = state.fuelRecords.filter(f => f.requisitionId === rq.id).length;
+      return `<tr class="${vTr}">${vTd(vPill(rq.kind === 'PR' ? 'acc' : '', esc(vFundShort(rq.kind))), { first:1 })}${vTd(`<span class="font-semibold">${esc(rq.refNo || '—')}</span>${rq.docUrl ? `<div>${vLink(rq.docUrl, 'Document')}</div>` : ''}`)}${vTd(vVehCell(v))}${vTd(esc(rq.fuelType || '—'))}${vTd(vDate(rq.date))}
+        ${vTd(`${vMoney(rq.amount)}<div class="text-[11.5px] text-slate-400">${vHasL(rq) ? vFmtL(rq.litres) : '—'}</div>`, { n:1 })}
+        ${vTd(`${vMoney(vReqUsed(rq))}<div class="text-[11.5px] text-slate-400">${vFmtL(vReqUsedL(rq))} · ${n} fill${n === 1 ? '' : 's'}</div>`, { n:1 })}
+        ${vTd(`<b>${vMoney(Math.max(0, vReqBalance(rq)))}</b><div class="font-semibold text-xs">${vHasL(rq) ? vFmtL(Math.max(0, vReqBalanceL(rq))) : '<span class="text-slate-400 font-normal">no litre limit</span>'}</div><div class="mt-1.5 w-28 ml-auto">${vBar(rq)}</div>`, { n:1 })}
+        ${vTd(`${vPill(st.k, st.t)}${st.t === 'Limit reached' ? `<div class="text-[11.5px] text-slate-400 mt-1">Add a new ${rq.kind === 'PR' ? 'PR' : 'petty cash'}</div>` : ''}`)}
+        ${vTd(`<button onclick="vehOpenReqView('${rq.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">View</button><button onclick="openVehReqForm('${rq.id}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Edit</button>${n ? `<button onclick="vehShowReqEntries('${rq.id}')" class="text-xs font-semibold text-brand-600 hover:underline">Entries</button>` : ''}`, { last:1, cls:'whitespace-nowrap text-right' })}</tr>`; }).join('')}</tbody></table>`)
+      : `<div class="bg-white rounded-xl border border-slate-200">${vEmpty(reqs.length ? 'No requisitions match your search or filters.' : 'No requisitions yet. Click <b>+ Fuel Requisition</b> to add a PR or Petty Cash amount for a vehicle.')}</div>`;
+  }
+  return `
+    ${vHead('Fueling', 'Fuel requisitions (PR / Petty Cash) and the fuel log for every vehicle.', admin ? vBtnPlain('+ Fuel Requisition', 'openVehReqForm(null,{vehicleId:vehUi.fuelVeh})') + vBtnPrimary('+ Add Fuel Entry', 'openVehFuelForm()') : '')}
+    ${vKpis(
+      statCard('PR balance available', vMoney0(avail('PR')), vFmtL(availL('PR')) + ' · ' + cnt('PR') + ' active PR' + (cnt('PR') === 1 ? '' : 's'), 'brand') +
+      statCard('Petty cash balance', vMoney0(avail('Petty Cash')), vFmtL(availL('Petty Cash')) + ' · ' + cnt('Petty Cash') + ' active', 'brand') +
+      statCard('Fuel cost this month', vMoney0(C), thisM.length + ' entries · ' + new Date().toLocaleDateString('en-GB', { month:'long' }), 'amber') +
+      statCard('Litres this month', L.toLocaleString('en-US', { maximumFractionDigits:1 }), L ? 'Avg ' + vMoney(C / L) + ' / L' : '—', 'emerald'))}
+    ${alerts}${toolbar}${body}`;
+}
+
+/* ---------- Servicing ---------- */
+function vehSvcTab(t){ vehUi.svcTab = t; rerenderMain(); }
+function viewServicing(){
+  const admin = canManageInventory();
+  const all = state.serviceRecords.slice().sort(vByDateDesc);
+  const per = all.filter(r => r.kind !== 'incident'), inc = all.filter(r => r.kind === 'incident');
+  const yr = vToday().slice(0, 4), ytd = all.filter(r => String(r.date || '').slice(0, 4) === yr);
+  const open = inc.filter(r => r.status !== 'Resolved').length;
+  const due = vehAlerts().filter(a => a.s.label === 'Periodic service').length;
+  const tab = vehUi.svcTab, pool = tab === 'periodic' ? per : inc;
+  const rows = pool.filter(r => (!vehUi.svcVeh || r.vehicleId === vehUi.svcVeh) && vMatch(vehUi.svcQ, vSvcHay(r)));
+  let body;
+  if(!rows.length) body = `<div class="bg-white rounded-xl border border-slate-200">${vEmpty((vehUi.svcQ || vehUi.svcVeh) && pool.length ? 'No records match your search.' : 'No ' + (tab === 'periodic' ? 'periodic service records' : 'incidental issues') + ' yet.')}</div>`;
+  else if(tab === 'periodic') body = vTableWrap(`<table class="w-full text-sm">${vTHead([{ t:'Date' }, { t:'Vehicle' }, { t:'Service' }, { t:'Odometer', n:1 }, { t:'Vendor' }, { t:'Cost', n:1 }, { t:'Next service' }, { t:'' }])}<tbody>${rows.map(r => {
+    const v = vehById(r.vehicleId), newer = state.serviceRecords.some(o => o !== r && o.kind !== 'incident' && o.vehicleId === r.vehicleId && (o.date || '') > (r.date || ''));
+    const st = r.nextDate && !newer ? vExpiry(r.nextDate) : null;
+    return `<tr class="${vTr}">${vTd(vDate(r.date), { first:1 })}${vTd(vVehCell(v))}${vTd(esc(r.serviceType || r.type || '—') + (r.docUrl ? `<div>${vLink(r.docUrl, 'Invoice')}</div>` : ''))}${vTd(r.odometer ? vNum(r.odometer).toLocaleString() : '—', { n:1 })}${vTd(esc(r.vendor || '—'))}${vTd(r.cost ? vMoney(r.cost) : '—', { n:1 })}
+      ${vTd(r.nextDate ? vDate(r.nextDate) + (st && (st.k === 'warn' || st.k === 'crit') ? ' ' + vPill(st.k, st.d < 0 ? 'Overdue' : 'Due soon') : '') + (r.nextOdometer ? `<div class="text-[11.5px] text-slate-400">or ${vNum(r.nextOdometer).toLocaleString()} km</div>` : '') : '—')}
+      ${vTd(`<button onclick="openVehServiceForm('${r.id}')" class="text-xs font-semibold text-brand-600 hover:underline">Edit</button>`, { last:1, cls:'text-right' })}</tr>`; }).join('')}</tbody></table>`);
+  else body = vTableWrap(`<table class="w-full text-sm">${vTHead([{ t:'Date of issue' }, { t:'Vehicle' }, { t:'Issue' }, { t:'Status' }, { t:'Vendor' }, { t:'Cost', n:1 }, { t:'' }])}<tbody>${rows.map(r => {
+    const v = vehById(r.vehicleId), k = r.status === 'Resolved' ? 'good' : r.status === 'In progress' ? 'warn' : 'crit';
+    return `<tr class="${vTr}">${vTd(vDate(r.date), { first:1 })}${vTd(vVehCell(v))}${vTd(`<div class="max-w-xs">${esc(r.issue || '—')}</div>${r.docUrl ? `<div>${vLink(r.docUrl, 'Report / invoice')}</div>` : ''}`)}${vTd(vPill(k, esc(r.status || 'Open')) + (r.resolvedDate ? `<div class="text-[11.5px] text-slate-400 mt-1">${vDate(r.resolvedDate)}</div>` : ''))}${vTd(esc(r.vendor || '—'))}${vTd(r.cost ? vMoney(r.cost) : '—', { n:1 })}
+      ${vTd(`<button onclick="openVehServiceForm('${r.id}')" class="text-xs font-semibold text-brand-600 hover:underline">Edit</button>`, { last:1, cls:'text-right' })}</tr>`; }).join('')}</tbody></table>`);
+  return `
+    ${vHead('Servicing', 'Periodic maintenance and incidental repairs.', admin ? vBtnPlain('+ Report Issue', "openVehServiceForm(null,'incident')") + vBtnPrimary('+ Periodic Service', "openVehServiceForm(null,'periodic')") : '')}
+    ${vKpis(
+      statCard('Service cost ' + yr, vMoney0(vSum(ytd, 'cost')), ytd.length + ' records', 'brand') +
+      statCard('Periodic services', fmtNum(per.length), 'All time', 'slate') +
+      statCard('Open issues', fmtNum(open), 'Incidental, not resolved', open ? 'amber' : 'slate') +
+      statCard('Services due ≤ ' + vehSettings.remindDays + 'd', fmtNum(due), 'Based on next service date', due ? 'amber' : 'slate'))}
+    <div class="flex flex-wrap items-center gap-2.5 mb-4">${vTabs([['periodic', 'Periodic (' + per.length + ')'], ['incident', 'Issues (' + inc.length + ')']], tab, 'vehSvcTab')}
+      ${vSearch('svc-q', 'svcQ', tab === 'periodic' ? 'Search plate, service type, workshop, notes…' : 'Search plate, issue, status, workshop…')}${vVehSelect('svcVeh', vehUi.svcVeh)}</div>
+    ${body}`;
+}
+
+/* ---------- Fuel reports ---------- */
+let vehLastRep = null;
+function vehRepPreset(p){ const r = vRepPresetRange(p); vehUi.repPreset = p; vehUi.repFrom = r.from; vehUi.repTo = r.to; rerenderMain(); }
+function viewVehicleReports(){
+  const D = vRepData(), T = D.tot, L = T.Petrol.l + T.Diesel.l, C = T.Petrol.c + T.Diesel.c;
+  const presets = [['month', 'This month'], ['3m', '3 months'], ['6m', '6 months'], ['year', 'This year'], ['all', 'All time']];
+  const gname = { day:'day', week:'week', month:'month' }[D.g];
+  const filters = `<div class="flex flex-wrap items-end gap-3 mb-5">
+    ${vTabs(presets, vehUi.repPreset, 'vehRepPreset')}
+    <label class="text-xs font-semibold text-slate-600">From<input type="date" value="${esc(D.from)}" onchange="vehSet('repFrom', this.value)" class="${VEH_INPUT} block mt-1"></label>
+    <label class="text-xs font-semibold text-slate-600">To<input type="date" value="${esc(D.to)}" onchange="vehSet('repTo', this.value)" class="${VEH_INPUT} block mt-1"></label>
+    ${vVehSelect('repVeh', vehUi.repVeh)}
+    ${vSelect('repGran', [['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']], vehUi.repGran, 'Auto (' + ({ day:'daily', week:'weekly', month:'monthly' })[D.g] + ')')}</div>`;
+  const kpis = vKpis(
+    statCard('Total litres', vFmtNum(L, 1) + ' L', D.recs.length + ' fuel entries', 'brand') +
+    statCard('Petrol', vFmtNum(T.Petrol.l, 1) + ' L', vMoney0(T.Petrol.c) + (T.Petrol.l ? ' · avg ' + vMoney(T.Petrol.c / T.Petrol.l) + '/L' : ''), 'amber') +
+    statCard('Diesel', vFmtNum(T.Diesel.l, 1) + ' L', vMoney0(T.Diesel.c) + (T.Diesel.l ? ' · avg ' + vMoney(T.Diesel.c / T.Diesel.l) + '/L' : ''), 'brand') +
+    statCard('Total fuel cost', vMoney0(C), vDate(D.from) + ' – ' + vDate(D.to), 'emerald'));
+  const head = vHead('Fuel Reports', 'Fuel consumption and cost — petrol vs diesel for the selected period.', vBtnPlain('Export CSV', 'vehRepCsv()') + vBtnPlain('Print', 'window.print()'));
+  if(!D.recs.length) return head + filters + kpis + `<div class="bg-white rounded-xl border border-slate-200">${vEmpty('No fuel entries between ' + vDate(D.from) + ' and ' + vDate(D.to) + (vehUi.repVeh ? ' for this vehicle' : '') + '. Try a wider period.')}</div>`;
+  const legend = `<div class="flex gap-4 text-xs text-slate-500">${VEH_FUEL_SERIES.map(s => `<span class="inline-flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-sm" style="background:${s.color}"></i>${s.key}</span>`).join('')}</div>`;
+  const rows = D.rows.filter(r => r.Petrol.l || r.Diesel.l || r.Petrol.c || r.Diesel.c);
+  const vr = Object.keys(D.byVeh).map(id => Object.assign({ id }, D.byVeh[id])).sort((a, b) => b.c - a.c);
+  return head + filters + kpis + `
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-xl border border-slate-200 xl:col-span-1"><div class="px-5 py-4 border-b border-slate-100"><h2 class="text-sm font-bold text-slate-900">Litres by fuel type</h2><div class="text-xs text-slate-400">${vDate(D.from)} – ${vDate(D.to)}</div></div><div id="veh-pie" class="p-4"></div></div>
+      <div class="bg-white rounded-xl border border-slate-200 xl:col-span-2"><div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap"><h2 class="text-sm font-bold text-slate-900">Fuel cost over time</h2>${legend}</div><div id="veh-line" class="p-4 relative"></div></div>
+    </div>
+    <div class="text-sm font-bold text-slate-900 mb-2">Breakdown by ${gname}</div>
+    ${vTableWrap(`<table class="w-full text-sm">${vTHead([{ t:'Period' }, { t:'Petrol (L)', n:1 }, { t:'Petrol cost', n:1 }, { t:'Diesel (L)', n:1 }, { t:'Diesel cost', n:1 }, { t:'Total (L)', n:1 }, { t:'Total cost', n:1 }])}<tbody>${rows.map(r => `<tr class="${vTr}">${vTd(esc(vBucketLabel(r.k, D.g, true)), { first:1 })}${vTd(vFmtNum(r.Petrol.l, 2), { n:1 })}${vTd(vMoney(r.Petrol.c), { n:1 })}${vTd(vFmtNum(r.Diesel.l, 2), { n:1 })}${vTd(vMoney(r.Diesel.c), { n:1 })}${vTd(vFmtNum(r.Petrol.l + r.Diesel.l, 2), { n:1 })}${vTd(`<b>${vMoney(r.Petrol.c + r.Diesel.c)}</b>`, { n:1, last:1 })}</tr>`).join('')}
+      <tr class="bg-slate-50 font-bold">${vTd('Total', { first:1 })}${vTd(vFmtNum(T.Petrol.l, 2), { n:1 })}${vTd(vMoney(T.Petrol.c), { n:1 })}${vTd(vFmtNum(T.Diesel.l, 2), { n:1 })}${vTd(vMoney(T.Diesel.c), { n:1 })}${vTd(vFmtNum(L, 2), { n:1 })}${vTd(vMoney(C), { n:1, last:1 })}</tr></tbody></table>`)}
+    <div class="text-sm font-bold text-slate-900 mb-2">By vehicle</div>
+    ${vTableWrap(`<table class="w-full text-sm">${vTHead([{ t:'Vehicle' }, { t:'Fuel' }, { t:'Entries', n:1 }, { t:'Litres', n:1 }, { t:'Cost', n:1 }, { t:'Avg / L', n:1 }])}<tbody>${vr.map(r => { const v = vehById(r.id); return `<tr class="${vTr}">${vTd(vVehCell(v), { first:1 })}${vTd(`<span class="inline-flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-sm" style="background:${r.ft === 'Petrol' ? '#f59e0b' : '#6366f1'}"></i>${r.ft}</span>`)}${vTd(r.n, { n:1 })}${vTd(vFmtNum(r.l, 2), { n:1 })}${vTd(`<b>${vMoney(r.c)}</b>`, { n:1 })}${vTd(r.l ? vMoney(r.c / r.l) : '—', { n:1, last:1 })}</tr>`; }).join('')}</tbody></table>`)}`;
+}
+function vehWireReports(){
+  if(ui.tab !== 'vehicle-reports') return;
+  vehLastRep = vRepData();
+  if(!vehLastRep.recs.length) return;
+  vehDrawPie(vehLastRep); vehDrawLine(vehLastRep);
+}
+let vehResizeTimer = null;
+window.addEventListener('resize', () => { clearTimeout(vehResizeTimer); vehResizeTimer = setTimeout(() => { if(ui.tab === 'vehicle-reports' && vehLastRep && vehLastRep.recs.length) vehDrawLine(vehLastRep); }, 150); });
+function vehDrawPie(D){
+  const el = document.getElementById('veh-pie'); if(!el) return;
+  const T = D.tot, total = T.Petrol.l + T.Diesel.l, S = 220, R = 100, r0 = 64, cx = S / 2, cy = S / 2;
+  let a = -Math.PI / 2, paths = '';
+  const pt = (rr, ang) => (cx + rr * Math.cos(ang)).toFixed(2) + ' ' + (cy + rr * Math.sin(ang)).toFixed(2);
+  VEH_FUEL_SERIES.forEach(s => {
+    const v = T[s.key].l; if(!v) return;
+    const frac = v / total;
+    if(frac >= 0.9999){ paths += `<circle class="vh-slice" data-k="${s.key}" cx="${cx}" cy="${cy}" r="${(R + r0) / 2}" fill="none" stroke="${s.color}" stroke-width="${R - r0}"/>`; return; }
+    const a2 = a + frac * 2 * Math.PI, lg = frac > 0.5 ? 1 : 0;
+    paths += `<path class="vh-slice" data-k="${s.key}" d="M${pt(R, a)} A${R} ${R} 0 ${lg} 1 ${pt(R, a2)} L${pt(r0, a2)} A${r0} ${r0} 0 ${lg} 0 ${pt(r0, a)}Z" fill="${s.color}"/>`;
+    a = a2;
+  });
+  const svg = `<svg viewBox="0 0 ${S} ${S}" width="${S}" height="${S}" role="img" aria-label="Litres by fuel type: Petrol ${vFmtNum(T.Petrol.l, 1)} L, Diesel ${vFmtNum(T.Diesel.l, 1)} L">${paths}<text x="${cx}" y="${cy - 4}" text-anchor="middle" class="vh-pie-total">${vFmtNum(total, 0)}</text><text x="${cx}" y="${cy + 16}" text-anchor="middle" class="vh-ax">litres total</text></svg>`;
+  const leg = VEH_FUEL_SERIES.map(s => { const v = T[s.key]; return `<div class="flex items-start gap-2.5"><i class="w-3 h-3 rounded-sm mt-1 shrink-0" style="background:${s.color}"></i><div><div class="text-sm font-bold text-slate-800">${s.key} <span class="text-xs font-semibold text-slate-400">${total ? (v.l / total * 100).toFixed(1) : 0}%</span></div><div class="text-xs text-slate-500">${vFmtNum(v.l, 1)} L · ${vMoney0(v.c)}</div></div></div>`; }).join('');
+  el.innerHTML = `<div class="relative flex justify-center">${svg}<div class="vh-tip" hidden></div></div><div class="space-y-3 mt-4">${leg}</div>`;
+  const tip = el.querySelector('.vh-tip'), box = el.querySelector('.relative');
+  el.querySelectorAll('.vh-slice').forEach(p => {
+    p.addEventListener('mousemove', ev => { const k = p.dataset.k, v = T[k], bb = box.getBoundingClientRect();
+      tip.innerHTML = `<b>${k}</b><div>${vFmtNum(v.l, 2)} L · ${(v.l / total * 100).toFixed(1)}%</div><div>${vMoney(v.c)}</div>`; tip.hidden = false;
+      tip.style.left = (ev.clientX - bb.left + 12) + 'px'; tip.style.top = (ev.clientY - bb.top + 12) + 'px';
+      el.querySelectorAll('.vh-slice').forEach(o => { o.style.opacity = o === p ? 1 : .45; }); });
+    p.addEventListener('mouseleave', () => { tip.hidden = true; el.querySelectorAll('.vh-slice').forEach(o => { o.style.opacity = 1; }); });
+  });
+}
+function vNiceMax(v){ if(v <= 0) return 10; const p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
+function vehDrawLine(D){
+  const el = document.getElementById('veh-line'); if(!el) return;
+  const W = Math.max(300, el.clientWidth - 32 || 600), H = 310, pl = 62, pr = 64, pt = 28, pb = 34, iw = W - pl - pr, ih = H - pt - pb, rows = D.rows, n = rows.length;
+  const maxV = vNiceMax(Math.max.apply(null, rows.map(r => Math.max(r.Petrol.c, r.Diesel.c))) * 1.05);
+  const X = i => pl + (n <= 1 ? iw / 2 : i * iw / (n - 1)), Y = v => pt + ih - (v / maxV) * ih;
+  let g = '';
+  for(let t = 0; t <= 4; t++){ const v = maxV * t / 4, y = Y(v); g += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" class="vh-grid ${t === 0 ? 'base' : ''}"/><text x="${pl - 8}" y="${y + 4}" text-anchor="end" class="vh-ax">${v >= 1000 ? vFmtNum(v / 1000, v % 1000 ? 1 : 0) + 'k' : vFmtNum(v, 0)}</text>`; }
+  g += `<text x="${pl}" y="12" class="vh-ax">Cost (${esc(vehSettings.currency)})</text>`;
+  const maxLabels = Math.max(2, Math.floor(iw / 70)), step = Math.ceil(n / maxLabels);
+  rows.forEach((r, i) => { if(i % step === 0 || (i === n - 1 && (n - 1) % step > step / 2)) g += `<text x="${X(i)}" y="${H - 10}" text-anchor="middle" class="vh-ax">${esc(vBucketLabel(r.k, D.g))}</text>`; });
+  let lines = '', ends = [];
+  VEH_FUEL_SERIES.forEach(s => {
+    const d = rows.map((r, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(r[s.key].c).toFixed(1)).join('');
+    lines += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if(n === 1) lines += `<circle cx="${X(0)}" cy="${Y(rows[0][s.key].c)}" r="4" fill="${s.color}"/>`;
+    ends.push({ k:s.key, y:Y(rows[n - 1][s.key].c), color:s.color });
+  });
+  ends.sort((a, b) => a.y - b.y); if(ends[1].y - ends[0].y < 14){ const mid = (ends[0].y + ends[1].y) / 2; ends[0].y = mid - 7; ends[1].y = mid + 7; }
+  ends.forEach(e => { lines += `<text x="${W - pr + 8}" y="${e.y + 4}" class="vh-ax" style="font-weight:700;fill:${e.color}">${e.k}</text>`; });
+  el.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="Fuel cost over time, petrol and diesel">${g}${lines}<line class="vh-xhair" x1="0" x2="0" y1="${pt}" y2="${pt + ih}" visibility="hidden"/>${VEH_FUEL_SERIES.map(s => `<circle class="vh-hdot" data-k="${s.key}" r="5" fill="${s.color}" visibility="hidden"/>`).join('')}<rect class="vh-hit" x="${pl}" y="${pt}" width="${iw}" height="${ih}" fill="transparent"/></svg><div class="vh-tip" hidden></div>`;
+  const svgEl = el.querySelector('svg'), tip = el.querySelector('.vh-tip'), xh = el.querySelector('.vh-xhair');
+  el.querySelector('.vh-hit').addEventListener('mousemove', ev => {
+    const bb = svgEl.getBoundingClientRect(), x = ev.clientX - bb.left; let i = n <= 1 ? 0 : Math.round((x - pl) / (iw / (n - 1))); i = Math.max(0, Math.min(n - 1, i));
+    const r = rows[i], cx = X(i); xh.setAttribute('x1', cx); xh.setAttribute('x2', cx); xh.setAttribute('visibility', 'visible');
+    el.querySelectorAll('.vh-hdot').forEach(c => { c.setAttribute('cx', cx); c.setAttribute('cy', Y(r[c.dataset.k].c)); c.setAttribute('visibility', 'visible'); });
+    tip.innerHTML = `<b>${esc(vBucketLabel(r.k, D.g, true))}</b>` + VEH_FUEL_SERIES.map(s => `<div class="flex justify-between gap-4"><span><i class="inline-block w-2 h-2 rounded-sm mr-1.5" style="background:${s.color}"></i>${s.key}</span><span>${vMoney(r[s.key].c)}</span></div><div style="opacity:.6;text-align:right;font-size:11px">${vFmtNum(r[s.key].l, 2)} L</div>`).join('');
+    tip.hidden = false; const tw = tip.offsetWidth; tip.style.left = (16 + (cx + 14 + tw > W ? cx - 14 - tw : cx + 14)) + 'px'; tip.style.top = (16 + pt + 6) + 'px';
+  });
+  el.querySelector('.vh-hit').addEventListener('mouseleave', () => { tip.hidden = true; xh.setAttribute('visibility', 'hidden'); el.querySelectorAll('.vh-hdot').forEach(c => c.setAttribute('visibility', 'hidden')); });
+}
+function vehRepCsv(){
+  const D = vRepData();
+  const rows = D.rows.map(r => [vBucketLabel(r.k, D.g, true), r.Petrol.l.toFixed(2), r.Petrol.c.toFixed(2), r.Diesel.l.toFixed(2), r.Diesel.c.toFixed(2), (r.Petrol.l + r.Diesel.l).toFixed(2), (r.Petrol.c + r.Diesel.c).toFixed(2)]);
+  downloadCSV('fdc-fuel-report_' + D.from + '_to_' + D.to + '.csv', ['Period', 'Petrol litres', 'Petrol cost', 'Diesel litres', 'Diesel cost', 'Total litres', 'Total cost'], rows);
+}
+
+/* ---------- form building blocks ---------- */
+const VEH_LBL = 'block text-xs font-semibold text-slate-600 mb-1.5';
+const VEH_FIELD = 'w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
+const vReqStar = ' <span class="text-rose-600">*</span>';
+function vF(label, name, val, type, o){
+  o = o || {}; type = type || 'text';
+  const attrs = (type === 'number' ? ' step="0.01" min="0" inputmode="decimal"' : '') + (type === 'url' ? ' inputmode="url" autocomplete="off" spellcheck="false"' : '') + (o.attrs || '');
+  return `<div class="${o.span || ''}"><label class="${VEH_LBL}">${label}${o.req ? vReqStar : ''}</label><input type="${type === 'url' ? 'text' : type}" name="${name}" value="${esc(val == null ? '' : val)}" ${type === 'url' ? 'class="veh-link ' + VEH_FIELD + '" placeholder="https://…"' : `class="${VEH_FIELD}"`}${attrs}></div>`;
+}
+function vS(label, name, list, sel, blank, o){
+  o = o || {};
+  return `<div class="${o.span || ''}"><label class="${VEH_LBL}">${label}${o.req ? vReqStar : ''}</label><select name="${name}" class="${VEH_FIELD} bg-white"${o.attrs || ''}>${blank != null ? `<option value="">${esc(blank)}</option>` : ''}${list.map(x => { const v = Array.isArray(x) ? x[0] : x, l = Array.isArray(x) ? x[1] : x; return `<option value="${esc(v)}" ${String(sel) === String(v) ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select></div>`;
+}
+const vTa = (label, name, val, o) => `<div class="${(o && o.span) || ''}"><label class="${VEH_LBL}">${label}${o && o.req ? vReqStar : ''}</label><textarea name="${name}" rows="${(o && o.rows) || 3}" class="${VEH_FIELD}" ${(o && o.ph) ? `placeholder="${esc(o.ph)}"` : ''}>${esc(val || '')}</textarea></div>`;
+const vSec = t => `<div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mt-5 mb-2.5">${t}</div>`;
+const vGrid = (n, inner) => `<div class="grid grid-cols-1 ${n === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-3.5">${inner}</div>`;
+const vFormOpen = '<form id="vform" onsubmit="return false" novalidate><div id="vf-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>';
+const vFoot = (saveLabel, saveFn, delFn) => `<div class="flex items-center justify-between gap-2.5 mt-6">${delFn ? `<button type="button" onclick="${delFn}" class="px-4 py-2 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50">Delete</button>` : '<span></span>'}<div class="flex gap-2.5"><button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Cancel</button><button type="button" id="vf-save" onclick="${saveFn}" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">${saveLabel}</button></div></div></form>`;
+function vFail(msg){ const e = document.getElementById('vf-error'); if(e){ e.textContent = msg; e.classList.remove('hidden'); e.scrollIntoView({ block:'nearest' }); } else toast(msg, true); return false; }
+function vehFormObj(form){
+  const o = {};
+  new FormData(form).forEach((v, k) => { if(typeof v !== 'string') return; const p = k.split('.'); let t = o; while(p.length > 1){ const x = p.shift(); t = t[x] = t[x] || {}; } t[p[0]] = v.trim(); });
+  return o;
+}
+const vehRequireAdmin = what => { if(canManageInventory()) return true; toast('Only admins can ' + what + '.', true); return false; };
+// pasted SharePoint links come in many shapes (rich text, text with a title…): keep just the web address
+document.addEventListener('paste', e => {
+  const t = e.target; if(!t.classList || !t.classList.contains('veh-link') || !e.clipboardData) return;
+  const plain = e.clipboardData.getData('text/plain') || '', html = e.clipboardData.getData('text/html') || '';
+  const hm = html.match(/href="([^"]+)"/i); const url = hm ? hm[1].replace(/&amp;/g, '&') : vCleanLink(plain);
+  if(!url) return;
+  e.preventDefault(); t.value = url;
+});
+
+/* ---------- Vehicle ---------- */
+let vehPendingImage = '';
+function vehStatFieldset(s, x){
+  const k = s.key;
+  return `<fieldset class="border border-slate-200 rounded-lg p-4 mb-3.5"><legend class="px-1.5 text-xs font-semibold text-slate-600">${s.label}</legend>
+    ${k === 'insurance' ? vGrid(2, vF('Insurance provider', 'insurance.provider', x.provider) + vF('Policy no.', 'insurance.policyNo', x.policyNo)) + '<div class="h-3.5"></div>' : ''}
+    ${vGrid(3, vF('Start date', k + '.start', x.start, 'date', { attrs:' data-dur-start onchange="vehDurChanged(this)"' }) +
+      vS('Duration', k + '.duration', VEH_DURATIONS, x.duration || '', null, { attrs:' data-dur onchange="vehDurChanged(this)"' }) +
+      vF('Expiry date', k + '.expiry', x.expiry, 'date', { attrs:' data-dur-end onchange="vehDurChanged(this)"' }))}
+    <div class="h-3.5"></div>
+    ${vGrid(3, vF('Cost (' + esc(vehSettings.currency) + ')', k + '.cost', x.cost, 'number') + vF('Document (SharePoint link)', k + '.docUrl', x.docUrl, 'url', { span:'sm:col-span-2' }))}
+    <div class="text-[11.5px] text-slate-400 mt-2.5">A reminder shows ${vehSettings.remindDays} days before expiry and again once it has expired.</div></fieldset>`;
+}
+function vehDurChanged(el){
+  const fs = el.closest('fieldset'), st = fs.querySelector('[data-dur-start]'), du = fs.querySelector('[data-dur]'), en = fs.querySelector('[data-dur-end]');
+  if(el === en){ du.value = ''; return; }
+  if(st.value && du.value) en.value = vAddMonths(st.value, +du.value);
+}
+function vehicleFormHtml(v){
+  const reg = v.registry || {};
+  return vFormOpen + `
+    <div class="flex items-center gap-4">
+      <div id="veh-img-prev" class="w-24 h-24 rounded-xl border border-slate-200 bg-slate-100 flex items-center justify-center text-xs text-slate-400 overflow-hidden shrink-0">${vehPendingImage ? `<img src="${esc(vehPendingImage)}" alt="" class="w-full h-full object-cover">` : 'No photo'}</div>
+      <div><label class="${VEH_LBL}">Vehicle image</label><input type="file" accept="image/*" onchange="vehImageChosen(this)" class="text-xs"><div class="text-[11.5px] text-slate-400 mt-1">Resized automatically before saving.</div>
+        <button type="button" id="veh-img-clear" onclick="vehClearImage()" class="text-xs font-semibold text-rose-600 hover:underline mt-1 ${vehPendingImage ? '' : 'hidden'}">Remove photo</button></div></div>
+    ${vSec('Basic details')}
+    ${vGrid(3, vF('Registration / plate no.', 'plate', v.plate, 'text', { req:1 }) + vS('Vehicle type', 'type', VEH_TYPES, v.type, 'Select…', { req:1 }) + vS('Fuel type', 'fuelType', VEH_FUELS, v.fuelType, 'Select…', { req:1 }) +
+      vF('Make', 'make', v.make) + vF('Model', 'model', v.model) + vF('Year', 'year', v.year, 'number', { attrs:' step="1"' }) +
+      vF('Colour', 'color', v.color) + vF('Chassis / hull no.', 'chassisNo', v.chassisNo) + vF('Engine no.', 'engineNo', v.engineNo) +
+      vF('Assigned to (driver)', 'assignedTo', v.assignedTo) + vF('Department', 'department', v.department) + vS('Status', 'status', VEH_STATUSES, v.status || 'Active') +
+      vF('Odometer (km / hrs)', 'mileage', v.mileage, 'number'))}
+    ${vSec('Statutory documents · Microsoft SharePoint')}
+    <div class="mb-3.5"><label class="${VEH_LBL}">SharePoint documents folder for this vehicle</label><input type="text" name="spFolder" value="${esc(v.spFolder || '')}" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://yourcompany.sharepoint.com/sites/…/Vehicles/P1234" class="veh-link ${VEH_FIELD}">
+      ${vehSettings.spBase && vSafeUrl(vehSettings.spBase) ? `<a href="${esc(vSafeUrl(vehSettings.spBase))}" target="_blank" rel="noopener" class="text-xs font-semibold text-brand-600 hover:underline">Open SharePoint to copy a link ↗</a>` : ''}</div>
+    <fieldset class="border border-slate-200 rounded-lg p-4 mb-3.5"><legend class="px-1.5 text-xs font-semibold text-slate-600">Vehicle registry</legend>
+      ${vGrid(3, vF('Registration date', 'registry.date', reg.date, 'date') + vF('Registered owner', 'registry.owner', reg.owner) + vF('Certificate no.', 'registry.certNo', reg.certNo) + vF('Registry document (SharePoint link)', 'registry.docUrl', reg.docUrl, 'url', { span:'sm:col-span-3' }))}</fieldset>
+    ${VEH_STATUTORY.map(s => vehStatFieldset(s, v[s.key] || {})).join('')}
+    ${vSec('Notes')}${vTa('', 'notes', v.notes, { ph:'Any other information' })}
+    ${vFoot(v.id ? 'Save changes' : 'Add vehicle', `saveVehicleForm('${v.id || ''}')`, v.id && canManageInventory() ? `vehConfirmDelete('${v.id}')` : '')}`;
+}
+function openVehicleForm(id){
+  const v = id ? vehById(id) : null;
+  if(id && !v) return;
+  if(!id && !vehRequireAdmin('add vehicles')) return;
+  vehPendingImage = v ? (v.image || '') : '';
+  openModal(v ? 'Edit vehicle' : 'Add vehicle', vehicleFormHtml(v || {}), true);
+}
+function vehCompressImage(file){
+  return new Promise((res, rej) => {
+    const r = new FileReader(); r.onerror = rej;
+    r.onload = () => { const img = new Image(); img.onerror = rej; img.onload = () => {
+      const max = 1200, w = img.width, h = img.height, s = Math.min(1, max / Math.max(w, h));
+      const c = document.createElement('canvas'); c.width = Math.round(w * s); c.height = Math.round(h * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.78)); }; img.src = r.result; };
+    r.readAsDataURL(file);
+  });
+}
+async function vehImageChosen(input){
+  if(!input.files[0]) return;
+  try{
+    vehPendingImage = await vehCompressImage(input.files[0]);
+    document.getElementById('veh-img-prev').innerHTML = `<img src="${vehPendingImage}" alt="" class="w-full h-full object-cover">`;
+    document.getElementById('veh-img-clear').classList.remove('hidden');
+  }catch(e){ toast('Could not read that image.', true); }
+}
+function vehClearImage(){ vehPendingImage = ''; document.getElementById('veh-img-prev').textContent = 'No photo'; document.getElementById('veh-img-clear').classList.add('hidden'); }
+async function saveVehicleForm(id){
+  const o = vehFormObj(document.getElementById('vform')), old = id ? vehById(id) : null;
+  if(!o.plate || !o.type || !o.fuelType) return vFail('Plate, vehicle type and fuel type are required.');
+  if(state.vehicles.find(x => x.id !== id && String(x.plate || '').toLowerCase() === o.plate.toLowerCase())) return vFail('A vehicle with plate ' + o.plate + ' already exists.');
+  for(const s of VEH_STATUTORY){
+    const x = o[s.key] = o[s.key] || {};
+    if(x.start && x.expiry && x.expiry < x.start) return vFail(s.label + ': the expiry date is before the start date.');
+    if(old && old[s.key] && old[s.key].history) x.history = old[s.key].history;
+  }
+  o.image = vehPendingImage || '';
+  if(id) o.id = id;
+  const btn = document.getElementById('vf-save'); if(btn) btn.disabled = true;
+  const nid = await vehSave('vehicles', o);
+  closeModal(); toast(id ? 'Vehicle updated.' : 'Vehicle added.');
+  openVehicle(nid || id);
+}
+function vehConfirmDelete(id){
+  const v = vehById(id); if(!v || !vehRequireAdmin('delete vehicles')) return;
+  closeModal();
+  confirmAction('Delete vehicle ' + (v.plate || '') + '? Its fuel and service records stay in the log.', async () => { await vehDelete('vehicles', id); goTo('vehicles'); toast('Vehicle deleted.'); });
+}
+
+/* ---------- Renewing a statutory document ---------- */
+function openVehRenew(id, key){
+  const v = vehById(id), s = VEH_STATUTORY.find(x => x.key === key); if(!v || !s) return;
+  const x = v[key] || {};
+  let start = vToday();
+  if(x.expiry){ const d = vParse(x.expiry); d.setDate(d.getDate() + 1); start = vIso(d); }      // the day after the old expiry
+  const dur = x.duration || '12';
+  openModal('Renew ' + s.label + ' · ' + (v.plate || ''), vFormOpen + `<p class="text-sm text-slate-500 mb-4">The current term (${vDate(x.start)} – ${vDate(x.expiry)}${x.cost ? ', ' + vMoney(x.cost) : ''}) will be kept in history.</p>` +
+    vehStatFieldset(s, { start, duration:dur, expiry: dur ? vAddMonths(start, +dur) : '', cost:x.cost, provider:x.provider, policyNo:x.policyNo, docUrl:'' }) + vFoot('Save renewal', `saveVehRenew('${id}','${key}')`));
+}
+async function saveVehRenew(id, key){
+  const o = vehFormObj(document.getElementById('vform')), v = vehById(id); if(!v) return;
+  const x = v[key] || {}, n = o[key];
+  if(!n.expiry) return vFail('The expiry date is required.');
+  const hist = (x.history || []).slice(); if(x.expiry) hist.unshift({ start:x.start || '', expiry:x.expiry, cost:x.cost || '', docUrl:x.docUrl || '' });
+  n.history = hist;
+  await vehSave('vehicles', { id, [key]: n });
+  closeModal(); toast('Renewal saved.');
+}
+
+/* ---------- read-only views of a requisition / fuel entry ---------- */
+function vDl(pairs){ return `<div class="grid grid-cols-2 gap-x-4 gap-y-3">${pairs.map(p => `<div><div class="text-[11px] text-slate-400">${p[0]}</div><div class="text-sm text-slate-800">${p[2] ? p[1] : esc(p[1] == null || p[1] === '' ? '—' : p[1])}</div></div>`).join('')}</div>`; }
+function vReqBalanceHtml(rq, highlightId){
+  const st = vReqStatus(rq), lim = vHasL(rq), bal = vReqBalance(rq), balL = lim ? vReqBalanceL(rq) : 0, admin = canManageInventory();
+  const fills = state.fuelRecords.filter(f => f.requisitionId === rq.id).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || (a.createdAt || 0) - (b.createdAt || 0));
+  let runC = vNum(rq.amount), runL = vNum(rq.litres);
+  const rows = fills.map(f => { runC -= vNum(f.total); runL -= vNum(f.litres);
+    return `<tr class="border-t border-slate-100 ${f.id === highlightId ? 'bg-amber-50' : ''}"><td class="py-2 pr-3">${vDate(f.date)}</td><td class="py-2 pr-3">${esc(f.poNo || '—')}</td><td class="py-2 pr-3 text-right num">${vFmtL(f.litres)}</td><td class="py-2 pr-3 text-right num">${vMoney(f.total)}</td><td class="py-2 text-right num"><b>${vMoney(runC)}</b>${lim ? `<div class="text-[11px] text-slate-400">${vFmtL(runL)}</div>` : ''}</td></tr>`; }).join('');
+  return `<div class="rounded-xl border ${st.k === 'crit' ? 'border-rose-300' : st.k === 'warn' ? 'border-amber-300' : 'border-slate-200'} p-4">
+      <div class="flex items-start justify-between gap-3"><div><div class="text-[11px] text-slate-400">Remaining balance</div><div class="text-2xl font-extrabold text-slate-900 num">${vMoney(Math.max(0, bal))}</div>
+        <div class="text-xs text-slate-500">${lim ? vFmtL(Math.max(0, balL)) + ' of ' + vFmtL(rq.litres) + ' left' : 'No litre limit set'}</div></div>${vPill(st.k, st.k === 'crit' ? 'Balance depleted' : st.t)}</div>
+      <div class="mt-3">${vBar(rq)}</div>
+      <div class="grid grid-cols-4 gap-3 mt-3 text-xs"><div><div class="text-slate-400">Value</div>${vMoney(rq.amount)}</div><div><div class="text-slate-400">Used</div>${vMoney(vReqUsed(rq))}</div><div><div class="text-slate-400">Litres used</div>${vFmtL(vReqUsedL(rq))}</div><div><div class="text-slate-400">Fills</div>${fills.length}</div></div></div>
+    ${st.k === 'crit' ? `<div class="mt-3 bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5">This ${rq.kind === 'PR' ? 'PR' : 'petty cash requisition'} is used up. Add a new one to keep logging fuel for this vehicle.${admin ? ` <button type="button" onclick="vehNewReqLike('${rq.id}')" class="font-semibold underline">Add new</button>` : ''}</div>` : ''}
+    ${vSec('Fills charged to this ' + (rq.kind === 'PR' ? 'PR' : 'requisition'))}
+    ${fills.length ? `<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="text-left text-slate-400"><th class="py-1.5 pr-3 font-semibold">Date</th><th class="py-1.5 pr-3 font-semibold">${rq.kind === 'PR' ? 'PO no.' : 'Voucher no.'}</th><th class="py-1.5 pr-3 font-semibold text-right">Litres</th><th class="py-1.5 pr-3 font-semibold text-right">Cost</th><th class="py-1.5 font-semibold text-right">Balance after</th></tr></thead><tbody><tr class="border-t border-slate-100 text-slate-500"><td colspan="4" class="py-2">Opening value</td><td class="py-2 text-right num">${vMoney(rq.amount)}${lim ? `<div class="text-[11px] text-slate-400">${vFmtL(rq.litres)}</div>` : ''}</td></tr>${rows}</tbody></table></div>` : '<div class="text-sm text-slate-400">No fuel has been charged to this requisition yet.</div>'}`;
+}
+function vehOpenReqView(id){
+  const rq = vReqById(id); if(!rq) return; const v = vehById(rq.vehicleId);
+  const body = vDl([['Type', rq.kind === 'PR' ? 'PR (Purchase Requisition)' : 'Petty Cash'], [rq.kind === 'PR' ? 'PR no.' : 'Petty cash no.', `<b>${esc(rq.refNo)}</b>`, 1], ['Date', vDate(rq.date)],
+      ['Vehicle', `<b>${esc(vLabel(v))}</b><div class="text-xs text-slate-400">${esc(vName(v))}</div>`, 1], ['Fuel type', rq.fuelType], ['Document', rq.docUrl ? vLink(rq.docUrl, 'Open document') : '—', 1]]) +
+    (rq.notes ? vSec('Notes') + `<div class="text-sm text-slate-600 whitespace-pre-wrap">${esc(rq.notes)}</div>` : '') + vSec('Balance') + vReqBalanceHtml(rq) +
+    `<div class="flex justify-end gap-2.5 mt-6"><button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Close</button><button type="button" onclick="openVehReqForm('${rq.id}')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Edit requisition</button></div>`;
+  openModal((rq.kind === 'PR' ? 'PR ' : 'Petty cash ') + rq.refNo, body, true);
+}
+function vehNewReqLike(id){ const sr = vReqById(id); if(!sr) return; openVehReqForm(null, { vehicleId:sr.vehicleId, fuelType:sr.fuelType, kind:sr.kind }); }
+function openVehFuelView(id){
+  const r = state.fuelRecords.find(x => x.id === id); if(!r) return;
+  const v = vehById(r.vehicleId), rq = vReqById(r.requisitionId);
+  const body = vDl([['Date', vDate(r.date)], ['Vehicle', `<b>${esc(vLabel(v))}</b><div class="text-xs text-slate-400">${esc(vName(v))}</div>`, 1], ['Fuel type', r.fuelType],
+      ['Litres', vFmtL(r.litres)], ['Rate per litre', r.rate ? vMoney(r.rate) : '—'], ['Total cost', `<b>${vMoney(r.total)}</b>`, 1],
+      ['Odometer', r.odometer ? vNum(r.odometer).toLocaleString() + ' km' : '—'], ['Fuel station', r.station], ['Filled by', r.filledBy],
+      [r.fundType === 'Petty Cash' ? 'Voucher no.' : 'PO no.', r.poNo], ['Delivery note no.', r.ref], ['Delivery note', r.docUrl ? vLink(r.docUrl, 'Open delivery note') : '—', 1]]) +
+    (r.notes ? vSec('Notes') + `<div class="text-sm text-slate-600 whitespace-pre-wrap">${esc(r.notes)}</div>` : '') +
+    (rq ? vSec((rq.kind === 'PR' ? 'PR' : 'Petty cash') + ' ' + esc(rq.refNo)) + vReqBalanceHtml(rq, r.id) : vSec('Funding') + '<div class="text-sm text-slate-400">Not charged to a PR or petty cash requisition.</div>') +
+    `<div class="flex justify-end gap-2.5 mt-6"><button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Close</button><button type="button" onclick="openVehFuelForm('${r.id}')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Edit entry</button></div>`;
+  openModal('Fuel entry · ' + vLabel(v) + ' · ' + vDate(r.date), body, true);
+}
+function vehShowDepleted(rq){
+  const word = rq.kind === 'PR' ? 'PR' : 'petty cash requisition', v = vehById(rq.vehicleId), admin = canManageInventory();
+  openModal('⚠ ' + (rq.kind === 'PR' ? 'PR' : 'Petty cash') + ' balance depleted',
+    `<p class="text-sm text-slate-700 mb-4"><b>${esc(rq.refNo)}</b> for <b>${esc(vLabel(v))}</b> (${esc(rq.fuelType)}) has no balance left. No more fuel can be charged to it.</p>${vReqBalanceHtml(rq)}
+     <p class="text-sm text-slate-500 mt-4">${admin ? 'Add a new ' + word + ' so fuel can be logged for this vehicle.' : 'Please ask an admin to add a new ' + word + '.'}</p>
+     <div class="flex justify-end gap-2.5 mt-6"><button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">${admin ? 'Later' : 'OK'}</button>${admin ? `<button type="button" onclick="vehNewReqLike('${rq.id}')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Add new ${rq.kind === 'PR' ? 'PR' : 'petty cash'}</button>` : ''}</div>`, true);
+}
+
+/* ---------- Requisition form ---------- */
+function openVehReqForm(id, preset){
+  if(!id && !vehRequireAdmin('add requisitions')) return;
+  if(!id && !state.vehicles.length){ toast('Add a vehicle first.', true); return; }
+  const r = id ? vReqById(id) : Object.assign({ date:vToday(), kind:'PR' }, preset || {});
+  if(id && !r) return;
+  if(!id && r.vehicleId && !r.fuelType){ const pv = vehById(r.vehicleId); if(pv) r.fuelType = pv.fuelType; }
+  const used = id ? vReqUsed(r) : 0;
+  openModal(id ? 'Edit fuel requisition' : 'New fuel requisition', vFormOpen + vGrid(2,
+    vS('Requisition type', 'kind', VEH_FUND_TYPES, r.kind, null, { req:1, span:'sm:col-span-2', attrs:' onchange="document.getElementById(\'veh-ref-lbl\').textContent = this.value === \'PR\' ? \'PR no.\' : \'Petty cash no.\'"' }) +
+    `<div class="sm:col-span-2"><label class="${VEH_LBL}">Vehicle${vReqStar}</label><select name="vehicleId" class="${VEH_FIELD} bg-white" onchange="vehPickVehFuel(this)"><option value="">Select vehicle…</option>${vSorted().map(v => `<option value="${esc(v.id)}" ${v.id === r.vehicleId ? 'selected' : ''}>${esc(v.plate)}${vName(v) ? ' — ' + esc(vName(v)) : ''}</option>`).join('')}</select></div>` +
+    vS('Fuel type', 'fuelType', VEH_FUELS, r.fuelType, 'Select…', { req:1 }) +
+    `<div><label class="${VEH_LBL}"><span id="veh-ref-lbl">${r.kind === 'PR' ? 'PR no.' : 'Petty cash no.'}</span>${vReqStar}</label><input name="refNo" value="${esc(r.refNo || '')}" class="${VEH_FIELD}"></div>` +
+    vF('Date', 'date', r.date, 'date', { req:1 }) + vF('Total value (' + esc(vehSettings.currency) + ')', 'amount', r.amount, 'number', { req:1 }) + vF('Total litres', 'litres', r.litres, 'number', { req:1 }) +
+    vF('Document (SharePoint link)', 'docUrl', r.docUrl, 'url') + vTa('Notes', 'notes', r.notes, { span:'sm:col-span-2', rows:2 }) +
+    (id ? `<div class="sm:col-span-2 text-xs text-slate-500">Used so far: <b>${vMoney(used)}</b> / <b>${vFmtL(vReqUsedL(r))}</b> · Balance: <b>${vMoney(vReqBalance(r))}</b>${vHasL(r) ? ' / <b>' + vFmtL(vReqBalanceL(r)) + '</b>' : ''}</div>
+      <label class="sm:col-span-2 flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" name="closed" ${r.closed ? 'checked' : ''}> Close this requisition (no more fuel can be charged to it)</label>`
+      : '<div class="sm:col-span-2 text-xs text-slate-500">Each fuel entry charged to this requisition is deducted from the total value and the total litres. When either balance runs out, add a new requisition for the vehicle.</div>')) +
+    vFoot(id ? 'Save changes' : 'Add requisition', `saveVehReq('${id || ''}')`, id && canManageInventory() ? `vehConfirmDeleteReq('${id}')` : ''), true);
+}
+function vehPickVehFuel(sel){ const v = vehById(sel.value); if(v && v.fuelType && sel.form.fuelType) sel.form.fuelType.value = v.fuelType; if(typeof vehRefreshReqSelect === 'function' && vehFuelCtx) vehRefreshReqSelect(); }
+async function saveVehReq(id){
+  const form = document.getElementById('vform'), o = vehFormObj(form);
+  o.closed = !!(form.closed && form.closed.checked);
+  if(!o.vehicleId || !o.fuelType || !o.refNo || !o.date || !vNum(o.amount) || !vNum(o.litres)) return vFail('Type, vehicle, fuel type, ref no., date, value and litres are required.');
+  if(state.fuelRequisitions.find(x => x.id !== id && x.kind === o.kind && String(x.refNo).toLowerCase() === o.refNo.toLowerCase())) return vFail(vFundShort(o.kind) + ' ' + o.refNo + ' already exists.');
+  if(id){
+    const old = vReqById(id), used = vReqUsed(old);
+    if(vNum(o.amount) < used) return vFail("The value can't be less than the amount already used (" + vMoney(used) + ').');
+    const usedL = vReqUsedL(old); if(vNum(o.litres) < usedL) return vFail("Litres can't be less than already used (" + vFmtL(usedL) + ').');
+    if(state.fuelRecords.some(f => f.requisitionId === id) && (o.vehicleId !== old.vehicleId || o.fuelType !== old.fuelType || o.kind !== old.kind)) return vFail("This requisition already has fuel entries — the vehicle, fuel type and type can't change.");
+    o.id = id;
+  }
+  await vehSave('fuelRequisitions', o);
+  closeModal(); vehUi.fuelTab = 'req'; goTo('fueling'); toast(id ? 'Requisition updated.' : 'Requisition added.');
+}
+function vehConfirmDeleteReq(id){
+  if(state.fuelRecords.some(f => f.requisitionId === id)){ vFail('This requisition has fuel entries — close it instead of deleting.'); return; }
+  closeModal(); confirmAction('Delete this requisition?', async () => { await vehDelete('fuelRequisitions', id); toast('Deleted.'); });
+}
+
+/* ---------- Fuel entry form ---------- */
+let vehFuelCtx = null;
+function openVehFuelForm(id){
+  if(!id && !vehRequireAdmin('add fuel entries')) return;
+  if(!id && !state.vehicles.length){ toast('Add a vehicle first.', true); return; }
+  const r = id ? state.fuelRecords.find(x => x.id === id) : { date:vToday(), fundType:'PR', vehicleId:vehUi.fuelVeh || '' };
+  if(id && !r) return;
+  if(!id && r.vehicleId){ const pv = vehById(r.vehicleId); if(pv) r.fuelType = pv.fuelType; }
+  vehFuelCtx = { id, keepReq:r.requisitionId || '' };
+  openModal(id ? 'Edit fuel entry' : 'Add fuel entry', vFormOpen + vGrid(2,
+    `<div class="sm:col-span-2"><label class="${VEH_LBL}">Vehicle${vReqStar}</label><select name="vehicleId" class="${VEH_FIELD} bg-white" onchange="vehFuelVehChanged(this)"><option value="">Select vehicle…</option>${vSorted().map(v => `<option value="${esc(v.id)}" ${v.id === r.vehicleId ? 'selected' : ''}>${esc(v.plate)}${vName(v) ? ' — ' + esc(vName(v)) : ''}</option>`).join('')}</select></div>` +
+    vS('Fuel type', 'fuelType', VEH_FUELS, r.fuelType, 'Select…', { req:1, attrs:' onchange="vehRefreshReqSelect()"' }) + vF('Date', 'date', r.date, 'date', { req:1 }) +
+    `<fieldset class="sm:col-span-2 border border-slate-200 rounded-lg p-4"><legend class="px-1.5 text-xs font-semibold text-slate-600">Funding</legend>${vGrid(2,
+      vS('Charge to', 'fundType', VEH_FUND_TYPES, r.fundType || 'PR', null, { req:1, attrs:' onchange="vehRefreshReqSelect()"' }) +
+      `<div><label class="${VEH_LBL}">Requisition${vReqStar}</label><select name="requisitionId" class="${VEH_FIELD} bg-white" onchange="vehUpdateReqInfo()"></select></div>` +
+      `<div class="sm:col-span-2" id="veh-req-info"></div><div class="sm:col-span-2"><label class="${VEH_LBL}" id="veh-po-lbl">PO no.</label><input name="poNo" value="${esc(r.poNo || r.ref || '')}" class="${VEH_FIELD}"></div>`)}</fieldset>` +
+    vF('Litres', 'litres', r.litres, 'number', { req:1, attrs:' oninput="vehFuelCalc()"' }) + vF('Rate per litre (' + esc(vehSettings.currency) + ')', 'rate', r.rate, 'number', { attrs:' oninput="vehFuelCalc()"' }) +
+    vF('Total cost (' + esc(vehSettings.currency) + ')', 'total', r.total, 'number', { req:1, attrs:' oninput="vehUpdateReqInfo()"' }) + vF('Odometer (km / hrs)', 'odometer', r.odometer, 'number') +
+    vF('Fuel station', 'station', r.station) + vF('Delivery note no.', 'ref', r.poNo ? r.ref : '') +
+    vF('Filled by', 'filledBy', r.filledBy || (authUser ? authUser.name : '')) + vF('Delivery note (SharePoint link)', 'docUrl', r.docUrl, 'url') +
+    vTa('Notes', 'notes', r.notes, { span:'sm:col-span-2', rows:2 })) + vFoot(id ? 'Save changes' : 'Add fuel entry', `saveVehFuel('${id || ''}')`, id && canManageInventory() ? `vehConfirmDeleteFuel('${id}')` : ''), true);
+  vehRefreshReqSelect(r.requisitionId);
+}
+function vehFuelVehChanged(sel){ const v = vehById(sel.value); if(v && v.fuelType) sel.form.fuelType.value = v.fuelType; vehRefreshReqSelect(); }
+function vehFuelCalc(){ const f = document.getElementById('vform'), L = vNum(f.litres.value), R = vNum(f.rate.value); if(L && R) f.total.value = (L * R).toFixed(2); vehUpdateReqInfo(); }
+function vehRefreshReqSelect(pick){
+  const f = document.getElementById('vform'); if(!f || !vehFuelCtx || !f.requisitionId) return;
+  const kind = f.fundType.value, sel = f.requisitionId, cur = pick !== undefined ? pick : sel.value;
+  document.getElementById('veh-po-lbl').textContent = kind === 'PR' ? 'PO no.' : 'Petty cash voucher no.';
+  const kr = vehFuelCtx.keepReq && vReqById(vehFuelCtx.keepReq);
+  const keep = (kr && kr.kind === kind && kr.vehicleId === f.vehicleId.value) ? vehFuelCtx.keepReq : null;
+  const list = (f.vehicleId.value && f.fuelType.value) ? vUsableReqs(f.vehicleId.value, f.fuelType.value, kind, vehFuelCtx.id, keep) : [];
+  sel.innerHTML = list.length ? list.map(rq => `<option value="${esc(rq.id)}">${esc(rq.refNo)} — bal. ${esc(vMoney(vReqBalance(rq, vehFuelCtx.id)))}${vHasL(rq) ? ' · ' + esc(vFmtL(vReqBalanceL(rq, vehFuelCtx.id))) : ''}</option>`).join('') : '<option value="">No requisition with balance</option>';
+  if(cur && list.some(x => x.id === cur)) sel.value = cur;
+  vehUpdateReqInfo();
+}
+function vehUpdateReqInfo(){
+  const f = document.getElementById('vform'), box = document.getElementById('veh-req-info'); if(!f || !box || !f.requisitionId) return;
+  const kind = f.fundType.value, word = kind === 'PR' ? 'PR' : 'petty cash';
+  if(!f.vehicleId.value || !f.fuelType.value){ box.innerHTML = `<span class="text-xs text-slate-400">Select the vehicle and fuel type to see the available ${word} balance.</span>`; return; }
+  const rq = vReqById(f.requisitionId.value);
+  if(!rq){ box.innerHTML = `<div class="bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5">No ${word} balance for this vehicle (${esc(f.fuelType.value)}). The limit has been reached or none exists — <button type="button" onclick="vehAddReqFromFuel()" class="font-semibold underline">add a new ${kind === 'PR' ? 'PR' : 'petty cash requisition'}</button>.</div>`; return; }
+  const exclude = vehFuelCtx && vehFuelCtx.id, bal = vReqBalance(rq, exclude), t = vNum(f.total.value), after = bal - t;
+  const lim = vHasL(rq), balL = lim ? vReqBalanceL(rq, exclude) : 0, tl = vNum(f.litres.value), afterL = balL - tl, overL = lim && afterL < 0;
+  const cell = (l, v, b) => `<div><div class="text-slate-400">${l}</div>${b ? `<b>${v}</b>` : v}</div>`;
+  box.innerHTML = `<div class="rounded-lg border ${after < 0 || overL ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-slate-50'} p-3 text-xs"><div class="grid grid-cols-4 gap-3">${cell('Value', vMoney(rq.amount))}${cell('Available', vMoney(bal))}${cell('This entry', vMoney(t))}${cell('Balance after', vMoney(after), 1)}</div>
+    <div class="grid grid-cols-4 gap-3 mt-2.5">${cell('Litres', lim ? vFmtL(rq.litres) : '—')}${cell('Available', lim ? vFmtL(balL) : '—')}${cell('This entry', vFmtL(tl))}${cell('Litres after', lim ? vFmtL(afterL) : '—', 1)}</div></div>` +
+    (after < 0 ? `<div class="bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2 mt-2">This entry exceeds the ${word} value balance by ${vMoney(-after)}.</div>` : '') +
+    (overL ? `<div class="bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2 mt-2">This entry exceeds the ${word} litre balance by ${vFmtL(-afterL)}.</div>` : '') +
+    (after < 0 || overL ? `<div class="text-xs text-slate-500 mt-1">Reduce the entry or add a new ${word} requisition.</div>` : '');
+}
+function vehAddReqFromFuel(){ const f = document.getElementById('vform'); const pre = { vehicleId:f.vehicleId.value, fuelType:f.fuelType.value, kind:f.fundType.value }; if(!vehRequireAdmin('add requisitions')) return; openVehReqForm(null, pre); }
+async function saveVehFuel(id){
+  const o = vehFormObj(document.getElementById('vform'));
+  if(!o.vehicleId || !o.fuelType || !o.date || !vNum(o.litres) || !vNum(o.total)) return vFail('Vehicle, fuel type, date, litres and total are required.');
+  const rq = vReqById(o.requisitionId);
+  if(!rq) return vFail('Select a ' + (o.fundType === 'PR' ? 'PR' : 'petty cash') + ' requisition with balance for this vehicle.');
+  if(rq.vehicleId !== o.vehicleId || rq.fuelType !== o.fuelType || rq.kind !== o.fundType) return vFail('The requisition does not match the vehicle / fuel type.');
+  const bal = vReqBalance(rq, id);
+  if(vNum(o.total) > bal + 0.001) return vFail('This exceeds the available balance of ' + vMoney(bal) + ' on ' + vReqLabel(rq) + '.');
+  const balL = vHasL(rq) ? vReqBalanceL(rq, id) : null;
+  if(balL !== null && vNum(o.litres) > balL + 0.001) return vFail('This exceeds the available litres (' + vFmtL(balL) + ') on ' + vReqLabel(rq) + '.');
+  if(id) o.id = id;
+  if(vNum(o.odometer)){ const v = vehById(o.vehicleId); if(v && vNum(o.odometer) > vNum(v.mileage)) await vehSave('vehicles', { id:v.id, mileage:o.odometer }); }
+  await vehSave('fuelRecords', o);
+  closeModal(); vehUi.fuelTab = 'log'; goTo('fueling');
+  const left = bal - vNum(o.total), leftL = balL === null ? null : balL - vNum(o.litres);
+  toast('Fuel entry saved · ' + vReqLabel(rq) + ' balance ' + vMoney(left) + (leftL !== null ? ' / ' + vFmtL(leftL) : ''));
+  if(left <= 0.004 || (leftL !== null && leftL <= 0.004)) setTimeout(() => { const fresh = vReqById(rq.id); if(fresh) vehShowDepleted(fresh); }, 350);
+}
+function vehConfirmDeleteFuel(id){ closeModal(); confirmAction('Delete this fuel entry?', async () => { await vehDelete('fuelRecords', id); toast('Deleted.'); }); }
+
+/* ---------- Service & incident forms ---------- */
+function openVehServiceForm(id, kind){
+  if(!id && !vehRequireAdmin('add service records')) return;
+  if(!id && !state.vehicles.length){ toast('Add a vehicle first.', true); return; }
+  const r = id ? state.serviceRecords.find(x => x.id === id) : { date:vToday(), kind };
+  if(id && !r) return;
+  kind = r.kind === 'incident' ? 'incident' : 'periodic';
+  const vehSel = `<div class="sm:col-span-2"><label class="${VEH_LBL}">Vehicle${vReqStar}</label><select name="vehicleId" class="${VEH_FIELD} bg-white"><option value="">Select vehicle…</option>${vSorted().map(v => `<option value="${esc(v.id)}" ${v.id === r.vehicleId ? 'selected' : ''}>${esc(v.plate)}${vName(v) ? ' — ' + esc(vName(v)) : ''}</option>`).join('')}</select></div>`;
+  const body = kind === 'periodic'
+    ? vGrid(2, vehSel + vF('Service date', 'date', r.date, 'date', { req:1 }) + vS('Service type', 'serviceType', VEH_SERVICE_TYPES, r.serviceType || r.type) + vF('Odometer (km / hrs)', 'odometer', r.odometer, 'number') + vF('Workshop / vendor', 'vendor', r.vendor) +
+        vF('Cost (' + esc(vehSettings.currency) + ')', 'cost', r.cost, 'number') + vF('Invoice (SharePoint link)', 'docUrl', r.docUrl, 'url') + vF('Next service date', 'nextDate', r.nextDate, 'date') + vF('Next service odometer', 'nextOdometer', r.nextOdometer, 'number') + vTa('Work done / notes', 'notes', r.notes, { span:'sm:col-span-2' }))
+    : vGrid(2, vehSel + vF('Date of the issue', 'date', r.date, 'date', { req:1 }) + vS('Status', 'status', VEH_ISSUE_STATUSES, r.status || 'Open') + vTa('Issue', 'issue', r.issue, { span:'sm:col-span-2', req:1, ph:'Describe what happened / what is wrong' }) +
+        vF('Reported by', 'reportedBy', r.reportedBy || (authUser ? authUser.name : '')) + vF('Resolved date', 'resolvedDate', r.resolvedDate, 'date') + vF('Workshop / vendor', 'vendor', r.vendor) + vF('Repair cost (' + esc(vehSettings.currency) + ')', 'cost', r.cost, 'number') +
+        vF('Report / invoice (SharePoint link)', 'docUrl', r.docUrl, 'url', { span:'sm:col-span-2' }) + vTa('Action taken', 'notes', r.notes, { span:'sm:col-span-2' }));
+  openModal((id ? 'Edit ' : '') + (kind === 'periodic' ? 'periodic service' : 'incidental issue'), vFormOpen + body + vFoot(id ? 'Save changes' : 'Save record', `saveVehService('${id || ''}','${kind}')`, id && canManageInventory() ? `vehConfirmDeleteService('${id}')` : ''), true);
+}
+async function saveVehService(id, kind){
+  const o = vehFormObj(document.getElementById('vform')); o.kind = kind;
+  if(!o.vehicleId || !o.date) return vFail('Vehicle and date are required.');
+  if(kind === 'incident' && !o.issue) return vFail('Please describe the issue.');
+  if(kind === 'incident' && o.status === 'Resolved' && !o.resolvedDate) o.resolvedDate = vToday();
+  if(id) o.id = id;
+  if(vNum(o.odometer)){ const v = vehById(o.vehicleId); if(v && vNum(o.odometer) > vNum(v.mileage)) await vehSave('vehicles', { id:v.id, mileage:o.odometer }); }
+  vehUi.svcTab = kind;
+  await vehSave('serviceRecords', o);
+  closeModal(); goTo('servicing'); toast('Record saved.');
+}
+function vehConfirmDeleteService(id){ closeModal(); confirmAction('Delete this service record?', async () => { await vehDelete('serviceRecords', id); toast('Deleted.'); }); }
+
+/* ---------- Settings (shared by everyone; admins change them) ---------- */
+function openVehSettings(){
+  if(!vehRequireAdmin('change vehicle settings')) return;
+  const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  openModal('Vehicle settings', vFormOpen + vGrid(2, vF('Reminder window (days before expiry)', 'remindDays', vehSettings.remindDays, 'number', { attrs:' step="1" min="1"' }) + vF('Currency label', 'currency', vehSettings.currency) +
+    vF('SharePoint site / library URL', 'spBase', vehSettings.spBase, 'url', { span:'sm:col-span-2' })) +
+    `<div class="mt-4 text-sm text-slate-600">Desktop notifications on this device: <b>${perm}</b> ${perm === 'default' ? `<button type="button" onclick="vehEnableNotif()" class="ml-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Enable</button>` : ''}</div>
+     <div class="mt-4 pt-4 border-t border-slate-100"><button type="button" onclick="openVehMigration()" class="text-sm font-semibold text-brand-600 hover:underline">Import data from the old Vehicle Management app…</button></div>` +
+    vFoot('Save settings', 'saveVehSettings()'));
+}
+function vehEnableNotif(){
+  Notification.requestPermission().then(() => {
+    const inSettings = document.getElementById('modal-title').textContent === 'Vehicle settings' && !document.getElementById('modal-overlay').classList.contains('hidden');
+    if(inSettings){ closeModal(); openVehSettings(); }
+    rerenderMain(); vehMaybeNotify(vehAlerts());
+  });
+}
+async function saveVehSettings(){
+  const o = vehFormObj(document.getElementById('vform'));
+  const sp = o.spBase ? normalizeWebUrl(o.spBase) : '';
+  if(sp === null) return vFail('The SharePoint address must be a web address (starting with https://).');
+  vehSettings = { remindDays:Math.max(1, Math.round(vNum(o.remindDays)) || 30), currency:o.currency || 'MVR', spBase:sp };
+  await persistVehSettings();
+  closeModal(); rerenderMain(); toast('Settings saved.');
+}
+
+/* ---------- One-time import of the existing data from the old Vehicle Management app ---------- */
+const VEH_OLD_FIREBASE = { apiKey:'AIzaSyCj0m27rYwINI2ZO1APNgu3-8Lu1liol_o', authDomain:'fdc-vehicle-management.firebaseapp.com', projectId:'fdc-vehicle-management', storageBucket:'fdc-vehicle-management.firebasestorage.app', messagingSenderId:'681628225367', appId:'1:681628225367:web:b4cdc4866bd08a31487812' };
+const VEH_OLD_COLS = { vehicles:'vehicles', fuel_records:'fuelRecords', service_records:'serviceRecords', fuel_requisitions:'fuelRequisitions' };
+let vehMig = null;
+function vDeepPlain(x){
+  if(x && typeof x === 'object'){
+    if(typeof x.toMillis === 'function') return x.toMillis();                // a Firestore timestamp becomes plain milliseconds
+    if(Array.isArray(x)) return x.map(vDeepPlain);
+    const o = {}; Object.keys(x).forEach(k => { o[k] = vDeepPlain(x[k]); }); return o;
+  }
+  return x;
+}
+function openVehMigration(){
+  if(!vehRequireAdmin('import vehicle data')) return;
+  if(!firestoreDb || !vehRefs.vehicles){ toast('Connect to cloud sync first.', true); return; }
+  vehMig = null;
+  openModal('Import from the old Vehicle Management app', `<div id="vm-error" class="hidden bg-rose-50 text-rose-700 text-sm rounded-lg px-3.5 py-2.5 mb-4"></div>
+    <p class="text-sm text-slate-600 mb-4">Copies the vehicles, fuel requisitions, fuel entries and service records from the old app into this one. <b>Nothing in the old app is changed or deleted</b>, and records that are already here are skipped. Sign in with your <b>old Vehicle Management</b> account so it can be read — it is used only for this and is not saved.</p>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5"><div><label class="${VEH_LBL}">Old app email</label><input type="email" id="vm-email" autocomplete="off" class="${VEH_FIELD}"></div><div><label class="${VEH_LBL}">Old app password</label><input type="password" id="vm-password" autocomplete="off" class="${VEH_FIELD}"></div></div>
+    <div class="flex justify-end gap-2.5 mt-6"><button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Cancel</button><button type="button" id="vm-go" onclick="vehMigConnect()" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Connect and preview</button></div>`, true);
+}
+function vmFail(msg){ const e = document.getElementById('vm-error'); if(e){ e.textContent = msg; e.classList.remove('hidden'); } }
+async function vehMigConnect(){
+  const email = document.getElementById('vm-email').value.trim(), pw = document.getElementById('vm-password').value;
+  if(!email || !pw) return vmFail('Enter the email and password of your old Vehicle Management account.');
+  const btn = document.getElementById('vm-go'); btn.disabled = true; btn.textContent = 'Reading…';
+  let app = null;
+  try{
+    app = firebase.initializeApp(VEH_OLD_FIREBASE, 'veh-old-' + Date.now());
+    await app.auth().signInWithEmailAndPassword(email, pw);
+    const db = app.firestore(), out = {};
+    for(const c of Object.keys(VEH_OLD_COLS)){
+      const snap = await db.collection(c).get();
+      out[VEH_OLD_COLS[c]] = snap.docs.map(d => Object.assign(vDeepPlain(d.data()), { id:d.id }));
+    }
+    try{ await app.auth().signOut(); }catch(e){}
+    vehMig = out;
+    vehMigPreview();
+  }catch(e){
+    btn.disabled = false; btn.textContent = 'Connect and preview';
+    const code = (e && e.code) || '';
+    vmFail(code.includes('permission-denied') ? 'The old database refused access with this account.' : friendlyAuthError(e));
+  }finally{
+    if(app){ try{ await app.delete(); }catch(e){} }
+  }
+}
+function vehMigPreview(){
+  const rows = Object.keys(VEH_COLS).map(k => { const incoming = vehMig[k] || [], have = new Set(state[k].map(x => x.id)); const fresh = incoming.filter(r => !have.has(r.id)); return { k, label:VEH_COLS[k].label, total:incoming.length, skip:incoming.length - fresh.length, fresh:fresh.length }; });
+  const todo = rows.reduce((s, r) => s + r.fresh, 0);
+  openModal('Import from the old Vehicle Management app', `<p class="text-sm text-slate-600 mb-4">${todo ? 'This is what will be copied. Nothing in the old app is touched.' : 'There is nothing new to import — everything in the old app is already here.'}</p>
+    <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100"><th class="py-2 font-semibold">Records</th><th class="py-2 text-right font-semibold">In old app</th><th class="py-2 text-right font-semibold">Already here</th><th class="py-2 text-right font-semibold">To import</th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="border-b border-slate-100 last:border-0"><td class="py-2.5 capitalize">${r.label}</td><td class="py-2.5 text-right num">${r.total}</td><td class="py-2.5 text-right num text-slate-400">${r.skip}</td><td class="py-2.5 text-right num font-bold">${r.fresh}</td></tr>`).join('')}</tbody></table></div>
+    <div class="flex justify-end gap-2.5 mt-6"><button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">Cancel</button>${todo ? `<button type="button" id="vm-run" onclick="vehMigRun()" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Import ${todo} record${todo === 1 ? '' : 's'}</button>` : ''}</div>`, true);
+}
+async function vehMigRun(){
+  if(!vehMig) return;
+  const btn = document.getElementById('vm-run'); if(btn){ btn.disabled = true; btn.textContent = 'Importing…'; }
+  let added = 0, failed = false;
+  for(const k of Object.keys(VEH_COLS)){
+    const have = new Set(state[k].map(x => x.id));
+    const fresh = (vehMig[k] || []).filter(r => !have.has(r.id));
+    if(!fresh.length) continue;
+    state[k] = state[k].concat(fresh); added += fresh.length;
+    await setJSON(k, state[k]);
+    // write to the cloud in batches that stay well under Firestore's size limit (vehicle photos are large)
+    let chunk = [], size = 0;
+    const flush = async () => {
+      if(!chunk.length) return;
+      const batch = firestoreDb.batch(); chunk.forEach(r => batch.set(vehRefs[k].doc(r.id), JSON.parse(JSON.stringify(r))));
+      try{ await batch.commit(); chunk.forEach(r => markSynced(k, r.id)); }catch(e){ failed = true; toast(syncErrorMessage(e, VEH_COLS[k].collection, 'save'), true); }
+      chunk = []; size = 0;
+    };
+    for(const r of fresh){ const n = JSON.stringify(r).length; if(chunk.length && (size + n > 6e6 || chunk.length >= 200)) await flush(); chunk.push(r); size += n; }
+    await flush();
+  }
+  vehMig = null; closeModal(); rerenderMain();
+  if(failed) scheduleUnsyncedCheck();
+  toast(failed ? added + ' records were copied to this device but could not all be saved to the cloud — use "Upload to cloud" on the banner.' : 'Imported ' + added + ' record' + (added === 1 ? '' : 's') + ' from the old app.', failed);
+}
+
 async function init(){
   const [products, movements, assets, assetTransfers, itemTransfers, purchaseRequisitions, handovers, locations, savedNotifSettings] = await Promise.all([
     getJSON('products', []),
@@ -1560,9 +2660,10 @@ async function init(){
   state.handovers = handovers || [];
   if(Array.isArray(locations) && locations.length) LOCATIONS = locations;
   if(savedNotifSettings && typeof savedNotifSettings==='object') notificationSettings = Object.assign(notificationSettings, savedNotifSettings);
+  await vehLoadCache();
   const cfg = getCloudConfig();
   if(cfg) cloudStatus = 'connecting'; // avoid a flash of the app before we know sign-in state
-  history.replaceState({ tab: ui.tab, selectedItemId: ui.selectedItemId, selectedAssetId: ui.selectedAssetId }, '', '#'+ui.tab);
+  history.replaceState({ tab: ui.tab, selectedItemId: ui.selectedItemId, selectedAssetId: ui.selectedAssetId, selectedVehicleId: ui.selectedVehicleId }, '', '#'+ui.tab);
   renderApp();
   if(cfg) initCloudIfConfigured();
 }
@@ -1609,7 +2710,7 @@ function renderApp(){
 
 let lastRenderedTab = null;
 let isPopStateNav = false;
-const DETAIL_TABS = ['item-detail','asset-detail'];
+const DETAIL_TABS = ['item-detail','asset-detail','vehicle-detail'];
 function render(){
   const activeEl = document.activeElement;
   const activeId = (activeEl && activeEl.id && el_contains_main(activeEl)) ? activeEl.id : null;
@@ -1621,7 +2722,7 @@ function render(){
     if(!ui.scrollPositions) ui.scrollPositions = {};
     ui.scrollPositions[lastRenderedTab] = window.scrollY;
     if(!isPopStateNav){
-      history.pushState({ tab: ui.tab, selectedItemId: ui.selectedItemId, selectedAssetId: ui.selectedAssetId }, '', '#'+ui.tab);
+      history.pushState({ tab: ui.tab, selectedItemId: ui.selectedItemId, selectedAssetId: ui.selectedAssetId, selectedVehicleId: ui.selectedVehicleId }, '', '#'+ui.tab);
     }
   }
 
@@ -1634,11 +2735,17 @@ function render(){
     else if(ui.tab==='item-detail') el.innerHTML = viewItemDetail();
     else if(ui.tab==='levels') el.innerHTML = viewStockLevels();
     else if(ui.tab==='movements') el.innerHTML = viewMovements();
+    else if(ui.tab==='stock-report') el.innerHTML = viewMovements('report');
     else if(ui.tab==='assets') el.innerHTML = viewAssets();
     else if(ui.tab==='asset-detail') el.innerHTML = viewAssetDetail();
     else if(ui.tab==='asset-transactions') el.innerHTML = viewAssetTransactions();
     else if(ui.tab==='purchase-requisitions') el.innerHTML = viewPurchaseRequisitions();
     else if(ui.tab==='handovers') el.innerHTML = viewHandovers();
+    else if(ui.tab==='vehicles') el.innerHTML = viewVehicles();
+    else if(ui.tab==='vehicle-detail') el.innerHTML = viewVehicleDetail();
+    else if(ui.tab==='fueling') el.innerHTML = viewFueling();
+    else if(ui.tab==='servicing') el.innerHTML = viewServicing();
+    else if(ui.tab==='vehicle-reports') el.innerHTML = viewVehicleReports();
     else if(ui.tab==='locations') el.innerHTML = viewLocations();
     else if(ui.tab==='admin') el.innerHTML = viewAdmin();
   }catch(e){
@@ -1646,6 +2753,7 @@ function render(){
     el.innerHTML = `<div class="text-center py-16 text-slate-500"><h3 class="text-base font-semibold text-slate-800 mb-1">Something went wrong</h3><p class="text-sm">${esc(e.message)}</p></div>`;
   }
   try{ const banner = unsyncedBannerHtml(); if(banner) el.innerHTML = banner + el.innerHTML; }catch(e){}
+  try{ vehAfterRender(); }catch(e){ console.error(e); }
   if(activeId){
     const newEl = document.getElementById(activeId);
     if(newEl && typeof newEl.focus === 'function'){
@@ -1699,6 +2807,7 @@ window.addEventListener('popstate', (e)=>{
     ui.tab = st.tab;
     ui.selectedItemId = st.selectedItemId;
     ui.selectedAssetId = st.selectedAssetId;
+    ui.selectedVehicleId = st.selectedVehicleId;
     toggleSidebar(false);
     render();
     isPopStateNav = false;
@@ -2166,7 +3275,7 @@ function viewDashboard(){
 }
 
 function statCard(label, value, sub, color){
-  const accents = { brand:'border-l-brand-500', emerald:'border-l-emerald-500', amber:'border-l-amber-500', slate:'border-l-slate-300' };
+  const accents = { brand:'border-l-brand-500', emerald:'border-l-emerald-500', amber:'border-l-amber-500', slate:'border-l-slate-300', rose:'border-l-rose-500' };
   return `
     <div class="bg-white rounded-xl border border-slate-200 border-l-4 ${accents[color]||accents.slate} p-5">
       <div class="text-xs font-medium text-slate-500">${label}</div>
@@ -2769,6 +3878,7 @@ function viewAdmin(){
     <div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed">
       Nobody can change an existing person's password directly here — that would need a backend server. You can add a member, update someone's designation, department, and role, or send them a password reset email.
     </div>
+    ${pendingMemberList().length ? `<div class="bg-amber-50 text-amber-800 text-[11.5px] rounded-lg px-3.5 py-2.5 mb-4 leading-relaxed"><b>Pending</b> members already have a sign-in but haven't opened the app yet. They become full members the first time they sign in.</div>` : ''}
     <div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
       ${list.length ? `
       <div class="overflow-x-auto">
@@ -2776,7 +3886,7 @@ function viewAdmin(){
           <thead><tr class="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
             <th class="px-5 sm:px-6 py-3 font-semibold">Name</th><th class="py-3 font-semibold">Email</th><th class="py-3 font-semibold">Designation</th><th class="py-3 font-semibold">Department</th><th class="py-3 font-semibold">Role</th><th class="py-3 pr-5 sm:pr-6 font-semibold text-right">Actions</th>
           </tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows}${pendingRowsHtml()}</tbody>
         </table>
       </div>` : `
       <div class="text-center py-16 px-6">
@@ -3150,6 +4260,17 @@ async function createMemberAuthAccount(name, email, password){
   }
 }
 let addingMember = false;
+// the email already has a sign-in account (created earlier) but there is no member profile, so the Admin Panel can't show them
+async function addMemberAlreadyHasSignIn(m, mode){
+  const btn = document.getElementById('am-go'), errEl = document.getElementById('am-error');
+  const reset = () => { addingMember = false; if(btn){ btn.disabled = false; btn.textContent = 'Add member'; } };
+  try{ await savePendingMember(Object.assign({ addedBy: authUser ? authUser.uid : null, addedAt: Date.now() }, m)); }
+  catch(e){ reset(); errEl.textContent = 'That email already has a sign-in account, but their details could not be saved: ' + syncErrorMessage(e, 'fdc_inventory_meta (pendingMembers doc)', 'save'); errEl.classList.remove('hidden'); return; }
+  let mailed = false;
+  if(mode === 'link'){ try{ await firebaseAuth.sendPasswordResetEmail(m.email); mailed = true; }catch(e){} }
+  reset(); closeModal();
+  toast(`${m.name} already has a sign-in, so they're listed as Pending. They become a full member the first time they sign in` + (mailed ? ` — a link to choose a password was emailed to ${m.email}.` : '.') + (m.role === 'admin' ? ' Make them an admin from Edit once they have signed in.' : ''));
+}
 async function submitAddMember(){
   if(addingMember) return;
   const errEl = document.getElementById('am-error');
@@ -3179,20 +4300,73 @@ async function submitAddMember(){
     addingMember = false;
     if(btn){ btn.disabled = false; btn.textContent = 'Add member'; }
     const code = (e && e.code) || '';
-    return fail(code.includes('email-already-in-use') ? 'An account with this email already exists. If they can\'t sign in, use "Send password reset email" on their row.' : friendlyAuthError(e));
+    if(code.includes('email-already-in-use')) return addMemberAlreadyHasSignIn({ name, email, designation, department, role }, mode);
+    return fail(friendlyAuthError(e));
   }
   let profileOk = true, emailOk = true, emailErr = '';
   try{
     await firestoreProfilesRef.doc(uid).set({ uid, email, name, role, designation, department, createdAt: Date.now(), createdBy: authUser ? authUser.uid : null });
-  }catch(e){ profileOk = false; toast(syncErrorMessage(e, 'fdc_inventory_profiles', 'save'), true); }
+  }catch(e){
+    profileOk = false; toast(syncErrorMessage(e, 'fdc_inventory_profiles', 'save'), true);
+    try{ await savePendingMember({ email, name, designation, department, role, addedBy: authUser ? authUser.uid : null, addedAt: Date.now() }); }catch(e2){}   // still visible in the list
+  }
   if(mode === 'link'){
     try{ await firebaseAuth.sendPasswordResetEmail(email); }catch(e){ emailOk = false; emailErr = friendlyAuthError(e); }
   }
   addingMember = false;
   closeModal();
-  if(!profileOk) toast(`${name}'s account was created, but their profile could not be saved. They can still sign in, and will appear here after their first login.`, true);
+  if(!profileOk) toast(`${name}'s account was created, but their profile could not be saved. They are listed as Pending and become a full member the first time they sign in.`, true);
   else if(!emailOk) toast(`${name} was added, but the password email could not be sent (${emailErr}). Use "Send password reset email" on their row.`, true);
   else toast(mode === 'link' ? `${name} was added. A link to choose their password was emailed to ${email}.` : `${name} was added. They can sign in now with the password you set.`);
+}
+
+/* ---------- members who already have a sign-in but have not opened the app yet ("Pending") ----------
+   Their details are kept in the shared settings collection (fdc_inventory_meta / pendingMembers), so they show in the
+   Admin Panel straight away. The first time they sign in, ensureOwnProfileDoc turns them into a full member with these details. */
+let pendingMembers = {}, pendingMembersUnsub = null;
+const pmKey = e => String(e || '').trim().toLowerCase().replace(/\./g, ',');
+function pendingMemberList(){
+  const have = new Set(state.profiles.map(p => String(p.email || '').toLowerCase()));
+  return Object.values(pendingMembers || {}).filter(m => m && m.email && !have.has(String(m.email).toLowerCase())).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+function listenPendingMembers(){
+  if(!firestoreDb) return;
+  if(pendingMembersUnsub) pendingMembersUnsub();
+  pendingMembersUnsub = firestoreDb.collection('fdc_inventory_meta').doc('pendingMembers').onSnapshot(doc => {
+    const d = doc.exists ? doc.data() : null;
+    pendingMembers = (d && d.list) || {};
+    renderApp();
+  }, () => {});
+}
+function stopPendingMembers(){ if(pendingMembersUnsub){ pendingMembersUnsub(); pendingMembersUnsub = null; } pendingMembers = {}; }
+async function savePendingMember(m){
+  await firestoreDb.collection('fdc_inventory_meta').doc('pendingMembers').set({ list: { [pmKey(m.email)]: m } }, { merge:true });
+  pendingMembers[pmKey(m.email)] = m;
+  try{ rerenderMain(); }catch(e){}
+}
+function removePendingMember(email){
+  confirmAction('Remove ' + email + ' from the pending list? Their sign-in account is not touched.', async () => {
+    try{
+      await firestoreDb.collection('fdc_inventory_meta').doc('pendingMembers').set({ list: { [pmKey(email)]: firebase.firestore.FieldValue.delete() } }, { merge:true });
+      delete pendingMembers[pmKey(email)]; renderApp(); toast('Removed from the pending list.');
+    }catch(e){ toast(syncErrorMessage(e, 'fdc_inventory_meta (pendingMembers doc)', 'delete'), true); }
+  });
+}
+function pendingRowsHtml(){
+  return pendingMemberList().map(m => `
+      <tr class="border-b border-slate-100 last:border-0 bg-amber-50">
+        <td class="px-5 sm:px-6 py-3"><div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-full bg-slate-400 text-white text-[11px] font-bold flex items-center justify-center shrink-0">${esc(initials(m.name))}</div>
+          <span class="font-medium text-slate-800">${esc(m.name)}</span>
+          <span class="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold" title="Has a sign-in account but hasn't opened the app yet">Pending</span></div></td>
+        <td class="py-3 text-slate-500">${esc(m.email)}</td>
+        <td class="py-3 text-slate-500">${esc(m.designation || '—')}</td>
+        <td class="py-3 text-slate-500">${esc(m.department || '—')}</td>
+        <td class="py-3 pr-4"><span class="inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">Member</span></td>
+        <td class="py-3 pr-5 sm:pr-6 text-right whitespace-nowrap">
+          <button onclick="sendPasswordResetForUser('${esc(m.email)}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Send password reset email</button>
+          <button onclick="removePendingMember('${esc(m.email)}')" class="text-xs font-semibold text-rose-600 hover:underline">Remove</button></td>
+      </tr>`).join('');
 }
 async function sendPasswordResetForUser(email){
   try{
@@ -3203,7 +4377,8 @@ async function sendPasswordResetForUser(email){
   }
 }
 
-function viewMovements(){
+function viewMovements(mode){
+  const report = mode === 'report';
   const f = ui.movementsFilter;
   let list = getFilteredMovements();
   list.sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt));
@@ -3213,8 +4388,8 @@ function viewMovements(){
   const acqBreakdown = acquisitionBreakdown(list);
   const locOptions = LOCATIONS.map(l=>`<option value="${l.id}" ${f.locationId===l.id?'selected':''}>${esc(l.name)}</option>`).join('');
   const acqOptions = ACQUISITION_TYPES.map(a=>`<option value="${esc(a)}" ${f.acquisition===a?'selected':''}>${esc(a)}</option>`).join('');
-  const isValuation = ui.movementsView==='valuation';
-  const isTransfers = ui.movementsView==='transfers';
+  const isValuation = report && ui.reportView==='valuation';
+  const isTransfers = !report && ui.movementsView==='transfers';
   const pendingTransferCount = state.itemTransfers.filter(t=>t.status==='pending').length;
   const transferList = isTransfers ? [...state.itemTransfers].sort((a,b)=> (b.date+b.createdAt).localeCompare(a.date+a.createdAt)) : [];
   const valuation = isValuation ? costValuationByItem() : [];
@@ -3229,21 +4404,23 @@ function viewMovements(){
   return `
     <div class="sticky-toolbar flex items-start justify-between gap-4 flex-wrap mb-6">
       <div>
-        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Stock Movements</h1>
-        <p class="text-sm text-slate-500 mt-0.5">Log stock coming in and going out, and generate a report for any period.</p>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">${report ? 'Stock Report' : 'Stock Movements'}</h1>
+        <p class="text-sm text-slate-500 mt-0.5">${report ? 'Stock movements for any period, and what consumption has cost.' : 'Log stock coming in and going out.'}</p>
       </div>
       <div class="flex gap-2.5 flex-wrap">
         ${!isValuation ? `<button onclick="exportMovementsCSV()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50">Export report (CSV)</button>` : ''}
-        <button onclick="openMovementForm('in')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
+        ${report ? '' : `<button onclick="openMovementForm('in')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm">+ Stock In</button>
         <button onclick="openMovementForm('out')" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 shadow-sm">+ Stock Out</button>
-        <button onclick="openItemTransferForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Stock Transfer</button>
+        <button onclick="openItemTransferForm()" class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm">+ Stock Transfer</button>`}
       </div>
     </div>
 
     <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1 mb-6">
-      <button onclick="ui.movementsView='log'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${(!isValuation&&!isTransfers)?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Movement Log</button>
-      <button onclick="ui.movementsView='valuation'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${isValuation?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Cost Valuation</button>
-      <button onclick="ui.movementsView='transfers'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors relative ${isTransfers?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Transfers${pendingTransferCount>0?` <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isTransfers?'bg-white text-brand-600':'bg-rose-500 text-white'} ml-1">${pendingTransferCount}</span>`:''}</button>
+      ${report ? `
+      <button onclick="ui.reportView='log'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${!isValuation?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Movement Report</button>
+      <button onclick="ui.reportView='valuation'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${isValuation?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Cost Valuation</button>` : `
+      <button onclick="ui.movementsView='log'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors ${!isTransfers?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Movement Log</button>
+      <button onclick="ui.movementsView='transfers'; rerenderMain();" class="px-4 py-2 rounded-md text-sm font-semibold transition-colors relative ${isTransfers?'bg-brand-600 text-white':'text-slate-600 hover:text-slate-900'}">Transfers${pendingTransferCount>0?` <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold ${isTransfers?'bg-white text-brand-600':'bg-rose-500 text-white'} ml-1">${pendingTransferCount}</span>`:''}</button>`}
     </div>
 
     ${isTransfers ? viewItemTransfersTab(transferList) : isValuation ? `
