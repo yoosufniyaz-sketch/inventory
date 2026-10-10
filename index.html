@@ -3906,8 +3906,9 @@ const pcStmtPending = s => (s.closed && s.rec) ? Math.max(0, pcRound(s.total - v
 function pcReconcile(f){
   const mine = state.pettyCash.filter(r => r.locationId === f.id && !pcInClosed(r)), cnt = pcCountOf(f.id);
   const assigned = pcFloatOf(f), spent = pcRound(mine.filter(pcHasInvoice).reduce((s, r) => s + pcInvoiceTotal(r), 0)), advances = pcAdvances(f.id);
-  const stPending = pcRound(pcStatements(f.id).reduce((s, x) => s + pcStmtPending(x), 0)), pending = pcRound(stPending + advances), cash = cnt ? pcCountTotal(cnt.counts) : 0;
-  return { assigned, spent, advances, stPending, pending, cash, counted:!!cnt, at:cnt ? cnt.countedAt : 0, by:cnt ? cnt.countedBy : '', cashBalance:pcRound(cash + pending), expected:pcRound(assigned - spent), diff:pcRound(assigned - spent - pending - cash) };       // diff > 0: cash is short; diff < 0: cash is over
+  const stPending = pcRound(pcStatements(f.id).reduce((s, x) => s + pcStmtPending(x), 0)), manual = cnt ? Math.max(0, vNum(cnt.pendingManual)) : 0;        // manual: the pending replenishment the custodian enters with the count
+  const tracked = pcRound(stPending + advances), pending = pcRound(tracked + manual), cash = cnt ? pcCountTotal(cnt.counts) : 0;
+  return { assigned, spent, advances, stPending, manual, tracked, pending, cash, counted:!!cnt, at:cnt ? cnt.countedAt : 0, by:cnt ? cnt.countedBy : '', cashBalance:pcRound(cash + pending), expected:pcRound(assigned - spent), diff:pcRound(assigned - spent - pending - cash) };       // diff > 0: cash is short; diff < 0: cash is over
 }
 const pcDiffHtml = rc => !rc.counted ? '<span class="text-slate-400 text-xs">Not counted yet</span>' : Math.abs(rc.diff) < 0.005 ? '<span class="text-emerald-600 font-semibold text-xs">Balanced ✓</span>' : vPill('crit', (rc.diff > 0 ? 'Short ' : 'Over ') + fmtMVR(Math.abs(rc.diff)));
 function pcCashHtml(){
@@ -3917,7 +3918,7 @@ function pcCashHtml(){
 }
 function pcCountRecalc(){
   let total = 0; document.querySelectorAll('#pc-count-body input[data-d]').forEach(i => { const q = Math.max(0, Math.floor(vNum(i.value))), d = +i.dataset.d, t = pcRound(d * q); total += t; i.closest('tr').querySelector('.pc-ct').textContent = pcMoneyPlain(t); });
-  total = pcRound(total); const body = document.getElementById('pc-count-body'), pending = +body.dataset.pending, exp = +body.dataset.expected, bal = pcRound(total + pending), diff = pcRound(exp - bal);
+  total = pcRound(total); const body = document.getElementById('pc-count-body'), manual = Math.max(0, vNum(document.getElementById('pc-count-pending').value)), tracked = +body.dataset.tracked, exp = +body.dataset.expected, bal = pcRound(total + tracked + manual), diff = pcRound(exp - bal);
   document.getElementById('pc-count-total').textContent = fmtMVR(total); document.getElementById('pc-count-balance').textContent = fmtMVR(bal);
   const el = document.getElementById('pc-count-diff'); el.className = 'text-sm font-bold ' + (Math.abs(diff) < 0.005 ? 'text-emerald-600' : 'text-rose-600');
   el.textContent = Math.abs(diff) < 0.005 ? 'Balanced ✓' : (diff > 0 ? 'Short ' : 'Over ') + fmtMVR(Math.abs(diff));
@@ -3927,12 +3928,13 @@ function openPcCashCount(fundId){
   if(!pcCanCount(fundId)){ toast('Only the petty cash custodian (or an admin) can update the cash count.', true); return; }
   const cnt = pcCountOf(fundId), counts = (cnt && cnt.counts) || {}, rc = pcReconcile(f);
   openModal('Cash at hand — ' + f.name, `
-    <div class="text-[12.5px] text-slate-500 mb-3">Enter how many notes and coins of each kind are in the petty cash. You can update this at any time.${cnt ? `<br>Last counted ${esc(new Date(cnt.countedAt).toLocaleString())} by ${esc(cnt.countedBy || '')}.` : ''}</div>
+    <div class="text-[12.5px] text-slate-500 mb-3">Enter how many notes and coins of each kind are in the petty cash, and any amount waiting to be replenished. You can update this at any time.${cnt ? `<br>Last counted ${esc(new Date(cnt.countedAt).toLocaleString())} by ${esc(cnt.countedBy || '')}.` : ''}</div>
     <table class="w-full text-sm"><thead><tr class="text-left text-[11px] uppercase tracking-wider text-slate-400"><th class="py-1.5 font-semibold">Denomination</th><th class="py-1.5 font-semibold w-32">Quantity</th><th class="py-1.5 font-semibold text-right">Total MVR</th></tr></thead>
-      <tbody id="pc-count-body" data-expected="${rc.expected}" data-pending="${rc.pending}">${PC_DENOMS.map(d => `<tr class="border-t border-slate-100"><td class="py-1.5 font-semibold text-slate-700 num">${d}</td><td class="py-1.5"><input type="number" min="0" step="1" data-d="${d}" value="${esc(counts[String(d)] || '')}" oninput="pcCountRecalc()" class="${VEH_FIELD} !py-1.5"></td><td class="py-1.5 text-right num pc-ct">0.00</td></tr>`).join('')}</tbody></table>
-    <div class="border-t border-slate-200 mt-1 pt-3 grid grid-cols-2 gap-y-2 text-sm">
+      <tbody id="pc-count-body" data-expected="${rc.expected}" data-tracked="${rc.tracked}">${PC_DENOMS.map(d => `<tr class="border-t border-slate-100"><td class="py-1.5 font-semibold text-slate-700 num">${d}</td><td class="py-1.5"><input type="number" min="0" step="1" data-d="${d}" value="${esc(counts[String(d)] || '')}" oninput="pcCountRecalc()" class="${VEH_FIELD} !py-1.5"></td><td class="py-1.5 text-right num pc-ct">0.00</td></tr>`).join('')}</tbody></table>
+    <div class="border-t border-slate-200 mt-1 pt-3 grid grid-cols-2 gap-y-2.5 text-sm items-center">
       <span class="text-slate-500">Cash at hand</span><span id="pc-count-total" class="text-right font-bold num">MVR 0.00</span>
-      <span class="text-slate-500">Pending replenishment${rc.stPending || rc.advances ? `<span class="block text-[11px] text-slate-400">${rc.stPending ? 'Closed statements not yet replenished ' + fmtMVR(rc.stPending) : ''}${rc.stPending && rc.advances ? '<br>' : ''}${rc.advances ? 'Cash handed out, awaiting invoice ' + fmtMVR(rc.advances) : ''}</span>` : ''}</span><span class="text-right num">${fmtMVR(rc.pending)}</span>
+      <span class="text-slate-700 font-semibold">Pending replenishment<span class="block text-[11px] font-normal text-slate-400">Money waiting to come back to the petty cash (MVR)</span></span><input type="number" min="0" step="0.01" id="pc-count-pending" value="${rc.manual ? esc(String(rc.manual)) : ''}" placeholder="0.00" oninput="pcCountRecalc()" class="${VEH_FIELD} !py-1.5 text-right">
+      ${rc.tracked ? `<span class="text-slate-500 text-[12.5px]">Also tracked by the app<span class="block text-[11px] text-slate-400">${rc.stPending ? 'Closed statements not yet replenished ' + fmtMVR(rc.stPending) : ''}${rc.stPending && rc.advances ? '<br>' : ''}${rc.advances ? 'Cash handed out, awaiting invoice ' + fmtMVR(rc.advances) : ''}</span></span><span class="text-right num text-[12.5px]">${fmtMVR(rc.tracked)}</span>` : ''}
       <span class="text-slate-700 font-semibold">Cash balance<span class="block text-[11px] font-normal text-slate-400">cash at hand + pending replenishment</span></span><span id="pc-count-balance" class="text-right font-bold num">MVR 0.00</span>
       <span class="text-slate-500">Expected cash balance<span class="block text-[11px] text-slate-400">assigned balance − amount used</span></span><span class="text-right num">${fmtMVR(rc.expected)}</span>
       <span class="text-slate-500">Unbalanced</span><span id="pc-count-diff" class="text-right"></span></div>
@@ -3942,9 +3944,9 @@ function openPcCashCount(fundId){
 async function savePcCashCount(fundId){
   const f = pcFund(fundId); if(!f || !pcCanCount(fundId)) return;
   const counts = {}; document.querySelectorAll('#pc-count-body input[data-d]').forEach(i => { const q = Math.max(0, Math.floor(vNum(i.value))); if(q) counts[i.dataset.d] = q; });
-  const total = pcCountTotal(counts), prev = pcCountOf(fundId), rc = pcReconcile(f), diff = pcRound(rc.expected - rc.pending - total), at = Date.now();
+  const total = pcCountTotal(counts), prev = pcCountOf(fundId), rc = pcReconcile(f), manual = Math.max(0, vNum(document.getElementById('pc-count-pending').value)), diff = pcRound(rc.expected - rc.tracked - manual - total), at = Date.now();
   document.getElementById('pc-count-save').disabled = true;
-  await vehSave('pettyCounts', { id:fundId, counts, total, countedAt:at, countedBy:authUser ? authUser.name : '', countedByUid:authUser ? authUser.uid : '', log:((prev && prev.log) || []).concat([{ at, by:authUser ? authUser.name : '', total, diff }]).slice(-10) });
+  await vehSave('pettyCounts', { id:fundId, counts, total, pendingManual:manual, countedAt:at, countedBy:authUser ? authUser.name : '', countedByUid:authUser ? authUser.uid : '', log:((prev && prev.log) || []).concat([{ at, by:authUser ? authUser.name : '', total, pendingManual:manual, diff }]).slice(-10) });
   closeModal();
   if(Math.abs(diff) < 0.005) toast('Cash count saved. It balances.'); else toast('Cash count saved. The cash is ' + (diff > 0 ? 'short by ' : 'over by ') + fmtMVR(Math.abs(diff)) + '.', true);
 }
@@ -4075,7 +4077,7 @@ function pcCashBoxHtml(loc){
   const rc = pcReconcile(loc), bad = rc.counted && Math.abs(rc.diff) >= 0.005, cell = (l, v, strong) => `<div><div class="text-[11px] text-slate-400">${l}</div><div class="text-sm ${strong ? 'font-bold text-slate-900' : 'text-slate-700'} num">${v}</div></div>`;
   return vPanel('Cash at hand', pcCanCount(loc.id) ? `<button onclick="openPcCashCount('${esc(loc.id)}')" class="text-xs font-semibold text-brand-600 hover:underline">${rc.counted ? 'Update count' : 'Count cash'}</button>` : '', `
     <div class="px-5 sm:px-6 py-4 grid grid-cols-2 sm:grid-cols-5 gap-4 items-center ${bad ? 'border-l-4 border-rose-500' : ''}">${cell('Assigned', fmtMVR(rc.assigned))}${cell('Amount used', fmtMVR(rc.spent))}${cell('Pending replenishment', fmtMVR(rc.pending))}${cell('Cash at hand', rc.counted ? fmtMVR(rc.cash) : '—', 1)}<div><div class="text-[11px] text-slate-400">Unbalanced</div><div class="mt-0.5">${pcDiffHtml(rc)}</div></div></div>
-    <div class="px-5 sm:px-6 pb-3 text-[11.5px] text-slate-400">Cash at hand + pending replenishment = cash balance${rc.counted ? ' (' + fmtMVR(rc.cashBalance) + ')' : ''}, which should equal the assigned balance less the amount used (${fmtMVR(rc.expected)}).${rc.stPending ? ' Pending replenishment includes ' + fmtMVR(rc.stPending) + ' on closed statements not yet replenished.' : ''}${rc.counted ? ` Counted ${esc(new Date(rc.at).toLocaleString())}${rc.by ? ' by ' + esc(rc.by) : ''}.` : ' No count yet.'}</div>`);
+    <div class="px-5 sm:px-6 pb-3 text-[11.5px] text-slate-400">Cash at hand + pending replenishment = cash balance${rc.counted ? ' (' + fmtMVR(rc.cashBalance) + ')' : ''}, which should equal the assigned balance less the amount used (${fmtMVR(rc.expected)}).${rc.stPending || rc.manual ? ' Pending replenishment includes ' + [rc.manual ? fmtMVR(rc.manual) + ' entered with the count' : '', rc.stPending ? fmtMVR(rc.stPending) + ' on closed statements not yet replenished' : ''].filter(Boolean).join(' and ') + '.' : ''}${rc.counted ? ` Counted ${esc(new Date(rc.at).toLocaleString())}${rc.by ? ' by ' + esc(rc.by) : ''}.` : ' No count yet.'}</div>`);
 }
 function viewPcStatementsExcel(){
   const locId = pcStLocation(), loc = pcFund(locId), yy = vToday().slice(2, 4);
