@@ -1603,7 +1603,7 @@ const VEH_COLS = {
 const vehRefs = {}, vehUnsubs = {};
 let vehSettingsUnsub = null;
 let vehSettings = { remindDays:30, currency:'MVR', spBase:'' };
-const vehUi = { q:'', ftype:'', ffuel:'', fstatus:'', fuelTab:'log', fuelQ:'', fuelVeh:'', fuelMonth:'', fuelFund:'', fuelReq:'', svcTab:'periodic', svcQ:'', svcVeh:'', repPreset:'6m', repFrom:'', repTo:'', repVeh:'', repGran:'', pcQ:'', pcLoc:'', pcOpt:'', pcShown:30, stLoc:'', stFrom:'', stTo:'', stOpt:'', stTab:'excel', stXLoc:'', stSelLoc:'', stSel:[], stNo:'', pcStatus:'' };
+const vehUi = { q:'', ftype:'', ffuel:'', fstatus:'', fuelTab:'log', fuelQ:'', fuelVeh:'', fuelMonth:'', fuelFund:'', fuelReq:'', svcTab:'periodic', svcQ:'', svcVeh:'', repPreset:'6m', repFrom:'', repTo:'', repVeh:'', repGran:'', pcQ:'', pcLoc:'', pcOpt:'', pcShown:30, stLoc:'', stFrom:'', stTo:'', stOpt:'', stTab:'excel', stXLoc:'', stSelLoc:'', stSel:[], stNo:'', pcStatus:'', pcSort:'num-desc' };
 Object.keys(VEH_COLS).forEach(k => {
   state[k] = state[k] || [];
   SYNC_GUARDED[k] = { one:VEH_COLS[k].one, label:VEH_COLS[k].label, collection:VEH_COLS[k].collection, ref:()=>vehRefs[k] || null, listen:()=>listenVeh(k) };
@@ -2700,11 +2700,11 @@ const pcUserOptions = (sel, blank) => `${blank ? `<option value="">${esc(blank)}
 function pcBalancesHtml(){
   const rows = pcFundList().map(f => {
     const mine = state.pettyCash.filter(r => r.locationId === f.id && !pcInClosed(r)), assigned = pcFloatOf(f);
-    const spent = pcRound(mine.filter(pcHasInvoice).reduce((s, r) => s + pcInvoiceTotal(r), 0)), awaiting = pcRound(mine.filter(r => !pcHasInvoice(r)).reduce((s, r) => s + pcTotal(r), 0));
+    const spent = pcRound(mine.filter(pcHasInvoice).reduce((s, r) => s + pcInvoiceTotal(r), 0) + pcStatements(f.id).reduce((s, x) => s + pcStmtPending(x), 0)), awaiting = pcRound(mine.filter(r => !pcHasInvoice(r)).reduce((s, r) => s + pcTotal(r), 0));
     return { f, assigned, spent, awaiting, left:pcRound(assigned - spent - awaiting) };
   }).filter(x => x.assigned || x.spent || x.awaiting);
   if(!rows.length) return '';
-  return vPanel('Assigned petty cash balance', 'Spent and requested amounts count until their statement is closed', `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Location / fund' }, { t:'Assigned', n:1 }, { t:'Spent (statement not closed)', n:1 }, { t:'Requested, awaiting invoice', n:1 }, { t:'Available', n:1 }])}<tbody>${rows.map(x => `<tr class="${vTr}">${vTd(`<span class="inline-flex items-center gap-2"><i class="w-2.5 h-2.5 rounded-full" style="background:${esc(x.f.color)}"></i><span class="font-semibold">${esc(x.f.name)}</span></span>`, { first:1 })}${vTd(fmtMVR(x.assigned), { n:1 })}${vTd(fmtMVR(x.spent), { n:1 })}${vTd(fmtMVR(x.awaiting), { n:1 })}${vTd(`<b class="${x.left < 0 ? 'text-rose-600' : 'text-slate-900'}">${fmtMVR(x.left)}</b>`, { n:1, last:1 })}</tr>`).join('')}</tbody></table></div>`);
+  return vPanel('Assigned petty cash balance', 'Spent and requested amounts count until their statement is closed and replenished', `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Location / fund' }, { t:'Assigned', n:1 }, { t:'Spent (not yet replenished)', n:1 }, { t:'Requested, awaiting invoice', n:1 }, { t:'Available', n:1 }])}<tbody>${rows.map(x => `<tr class="${vTr}">${vTd(`<span class="inline-flex items-center gap-2"><i class="w-2.5 h-2.5 rounded-full" style="background:${esc(x.f.color)}"></i><span class="font-semibold">${esc(x.f.name)}</span></span>`, { first:1 })}${vTd(fmtMVR(x.assigned), { n:1 })}${vTd(fmtMVR(x.spent), { n:1 })}${vTd(fmtMVR(x.awaiting), { n:1 })}${vTd(`<b class="${x.left < 0 ? 'text-rose-600' : 'text-slate-900'}">${fmtMVR(x.left)}</b>`, { n:1, last:1 })}</tr>`).join('')}</tbody></table></div>`);
 }
 
 /* ---------- progress, processing, and the details window ---------- */
@@ -2795,8 +2795,17 @@ function pcReopenProcess(id){
     toast('Reopened.'); pcDone(id);
   });
 }
+// the order of the list: by voucher number (year, then the running number) unless you choose another
+const PC_SORTS = [['num-desc', 'Voucher number: newest first'], ['num-asc', 'Voucher number: oldest first'], ['date-desc', 'Date: newest first'], ['date-asc', 'Date: oldest first'], ['amt-desc', 'Amount: high to low']];
+function pcVoucherKey(n){ const m = /(\d{2,4})-(\d+)$/.exec(String(n || '')); return m ? [+String(m[1]).slice(-2), +m[2]] : [0, 0]; }       // PTC-V-AT-26-37 → [26, 37]
+function pcSortList(list, mode){
+  const byNum = (a, b) => { const x = pcVoucherKey(a.number), y = pcVoucherKey(b.number); return (x[0] - y[0]) || (x[1] - y[1]) || String(a.number || '').localeCompare(String(b.number || ''), undefined, { numeric:true }); };
+  const byDate = (a, b) => String(a.date || '').localeCompare(String(b.date || '')) || byNum(a, b);
+  const fn = { 'num-desc':(a, b) => byNum(b, a), 'num-asc':byNum, 'date-desc':(a, b) => byDate(b, a), 'date-asc':byDate, 'amt-desc':(a, b) => (pcTotal(b) - pcTotal(a)) || byNum(b, a) }[mode] || ((a, b) => byNum(b, a));
+  return list.sort(fn);
+}
 function viewPettyCash(){
-  const all = state.pettyCash.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (b.createdAt || 0) - (a.createdAt || 0));
+  const all = pcSortList(state.pettyCash.slice(), vehUi.pcSort);
   const mon = vToday().slice(0, 7), thisM = all.filter(r => String(r.date || '').slice(0, 7) === mon);
   const sumOpt = (list, o) => pcRound(list.filter(r => r.option === o).reduce((s, r) => s + pcTotal(r), 0));
   const awaiting = authUser ? all.filter(r => pcCanSign(r) && !pcSigned(r)).length : 0;
@@ -2829,7 +2838,7 @@ function viewPettyCash(){
     ${pcCashHtml()}
     <div class="flex flex-wrap gap-2.5 mb-5">
       ${vSearch('pc-q', 'pcQ', 'Search number, purpose, item, requester…')}
-      ${vSelect('pcStatus', PC_STATUSES.map(([k, l]) => [k, l + (counts[k] ? ' (' + counts[k] + ')' : '')]), vehUi.pcStatus, 'All statuses')}${vSelect('pcLoc', pcFundList().map(l => [l.id, l.name]), vehUi.pcLoc, 'All locations')}${vSelect('pcOpt', PC_OPTIONS, vehUi.pcOpt, 'All types')}
+      ${vSelect('pcStatus', PC_STATUSES.map(([k, l]) => [k, l + (counts[k] ? ' (' + counts[k] + ')' : '')]), vehUi.pcStatus, 'All statuses')}${vSelect('pcLoc', pcFundList().map(l => [l.id, l.name]), vehUi.pcLoc, 'All locations')}${vSelect('pcOpt', PC_OPTIONS, vehUi.pcOpt, 'All types')}${vSelect('pcSort', PC_SORTS, vehUi.pcSort || 'num-desc', null)}
     </div>
     ${!all.length ? `<div class="bg-white rounded-xl border border-slate-200">${vEmpty('No petty cash requests yet.<div class="mt-4">' + vBtnPrimary('+ New Request', 'openPcForm()') + '</div>')}</div>`
       : !list.length ? `<div class="bg-white rounded-xl border border-slate-200">${vEmpty('No requests match these filters.')}</div>`
@@ -3508,7 +3517,7 @@ async function pcPdfFinish(pages, o){
     if(o.number && !p.title) frame.text(553.5 - pdfTextWidth(o.number, false, 9), 71.4, o.number, { size: 9 });
     const pageTitle = p.title || o.title; frame.text(553.5 - pdfTextWidth(pageTitle, true, 17), 90.3, pageTitle, { bold: true, size: 17 });
     if(o.pageNumbers && total > 0){ frame.text(36, 818, 'Page ', { helv: true, size: 9 }); frame.text(36 + 21.8, 818, String(i + 1), { helv: true, bold: true, size: 9 }); const w = 21.8 + String(i + 1).length * 5; frame.text(36 + w + 2, 818, ' of ', { helv: true, size: 9 }); frame.text(36 + w + 16, 818, String(total), { helv: true, bold: true, size: 9 }); }
-    const content = f.add({ entries: '', data: enc.encode(frame.ops.concat(p.ops).join('\n')) });
+    const content = f.add({ entries: '', data: enc.encode((p.bare ? p.ops : frame.ops.concat(p.ops)).join('\n')) });      // a bare page (an invoice image) has no letterhead
     kids.push(f.add(`<< /Type /Page /Parent ${pagesNode} 0 R /MediaBox [0 0 ${PCA4_W} ${PCA4_H}] /Resources ${resources} 0 R /Contents ${content} 0 R >>`));
   });
   f.put(pagesNode, `<< /Type /Pages /Kids [${kids.map(k => k + ' 0 R').join(' ')}] /Count ${total} >>`);
@@ -3633,26 +3642,17 @@ async function buildPettyCashPdf(r){
     by += 13.55;
   }));
   const images = sig ? { SigReq: sig } : {};
-  // the invoice(s) follow the form: each attached file page by page, and a details page for any invoice without a file
-  const inv = pcInvoices(r); let imgN = 0; const noFile = [];
-  for(const [i, iv] of inv.entries()){
+  // the invoice file(s) follow the form exactly as they are: the image on a plain page, with no letterhead, title or caption
+  let imgN = 0;
+  for(const iv of pcInvoices(r)){
     let data = null; if(iv.fileId){ try{ data = await pcFileLoad(iv.fileId); }catch(e){} }
-    if(!data || !data.pages || !data.pages.length){ noFile.push(iv); continue; }
-    for(const [j, pd] of data.pages.entries()){
-      const ip = new PdfPage(PCA4_H); ip.title = 'INVOICE'; pages.push(ip);
-      ip.text(36.3, 118, (r.number || '') + '  ·  Invoice ' + (i + 1) + ' of ' + inv.length + (data.pages.length > 1 ? '  ·  page ' + (j + 1) + ' of ' + data.pages.length : ''), { bold:true, size:9 });
-      ip.text(36.3, 131, [iv.supplier, iv.number ? 'No. ' + iv.number : '', iv.date ? fmtDate(iv.date) : '', fmtMVR(iv.amount)].filter(Boolean).join('  ·  '), { size:8.5 });
-      const key = 'Inv' + (imgN++), maxW = 523, maxH = 640, sc = Math.min(maxW / pd.w, maxH / pd.h), iw = pd.w * sc, ih = pd.h * sc;
+    if(!data || !data.pages) continue;
+    for(const pd of data.pages){
+      const ip = new PdfPage(PCA4_H); ip.bare = true; pages.push(ip);
+      const key = 'Inv' + (imgN++), M = 18, sc = Math.min((PCA4_W - 2 * M) / pd.w, (PCA4_H - 2 * M) / pd.h), iw = pd.w * sc, ih = pd.h * sc;        // as large as fits, centred
       images[key] = { w:pd.w, h:pd.h, jpeg:pdfB64(pd.jpeg.slice(pd.jpeg.indexOf(',') + 1)) };
-      ip.image(key, 36.3 + (maxW - iw) / 2, 142, iw, ih);
+      ip.image(key, (PCA4_W - iw) / 2, (PCA4_H - ih) / 2, iw, ih);
     }
-  }
-  if(noFile.length){
-    const sp = new PdfPage(PCA4_H); sp.title = 'INVOICE DETAILS'; pages.push(sp); let y2 = 122;
-    sp.text(36.3, y2, (r.number || '') + '  ·  ' + (r.purpose || ''), { bold:true, size:10 }); y2 += 26;
-    [['Supplier', 36.3, 'l'], ['Invoice no.', 250, 'l'], ['Date', 360, 'l'], ['Amount', 559.3, 'r']].forEach(([t, x, a]) => sp.text(a === 'r' ? x - pdfTextWidth(t, true, 9) : x, y2, t, { bold:true, size:9 })); sp.line(36.3, y2 + 5, 559.3, y2 + 5, [0, 0, 0], 0.5); y2 += 20;
-    noFile.forEach(iv => { sp.text(36.3, y2, String(iv.supplier || ''), { size:9.5 }); sp.text(250, y2, String(iv.number || ''), { size:9.5 }); sp.text(360, y2, iv.date ? fmtDate(iv.date) : '', { size:9.5 }); const am = pcMoneyPlain(iv.amount); sp.text(559.3 - pdfTextWidth(am, false, 9.5), y2, am, { size:9.5 }); y2 += 18; });
-    sp.line(36.3, y2 - 8, 559.3, y2 - 8, [0, 0, 0], 0.5); const tt = pcMoneyPlain(noFile.reduce((s, iv) => s + vNum(iv.amount), 0)); sp.text(559.3 - pdfTextWidth(tt, true, 10), y2 + 8, tt, { bold:true, size:10 }); sp.text(500 - pdfTextWidth('Total', true, 10), y2 + 8, 'Total', { bold:true, size:10 });
   }
   return pcPdfFinish(pages, { title:'PETTY CASH REQUEST FORM', number: '', docTitle:'Petty Cash Request ' + (r.number || ''), images, pageNumbers:false });
 }
@@ -3770,12 +3770,12 @@ function pcStatements(locId, yy){
   }).filter(s => !yy || s.yy === yy).sort((a, b) => (a.at - b.at) || (pcStatementSeq(a.no) - pcStatementSeq(b.no)) || a.no.localeCompare(b.no));    // in the order they were made
 }
 // the statement number becomes the Excel sheet name, so it must be a valid one
-function pcStatementNoProblem(no){
+function pcStatementNoProblem(no, exceptNo){
   if(!no) return 'Enter the statement number.';
   if(no.length > 31) return 'The statement number can be at most 31 characters (it becomes the name of the Excel sheet).';
   if(/[\\\/?*\[\]:]/.test(no)) return 'The statement number cannot contain  \\ / ? * [ ] :';
   if(/^'|'$/.test(no)) return 'The statement number cannot start or end with an apostrophe.';
-  if(state.pettyCash.some(r => String(r.statementNo || '').toLowerCase() === no.toLowerCase()) || state.pettyStatements.some(s => String(s.no).toLowerCase() === no.toLowerCase())) return 'A statement numbered ' + no + ' already exists.';
+  if(no.toLowerCase() !== String(exceptNo || '').toLowerCase() && (state.pettyCash.some(r => String(r.statementNo || '').toLowerCase() === no.toLowerCase()) || state.pettyStatements.some(s => String(s.no).toLowerCase() === no.toLowerCase()))) return 'A statement numbered ' + no + ' already exists.';
   return '';
 }
 function pcStatementRow(r){
@@ -3834,7 +3834,7 @@ function pcFillStatementSheet(xml, s, ctx){
   const counts = ctx.cash || {}; let cashTotal = 0;
   PC_DENOMS.forEach((d, i) => { const q = Math.max(0, Math.floor(vNum(counts[String(d)]))), t = pcRound(d * q); cashTotal += t; if(q) setNum('W' + (14 + i), q); setCached('X' + (14 + i), t); });
   cashTotal = pcRound(cashTotal); setCached('X27', cashTotal);
-  const adv = pcRound(vNum(ctx.advances)); if(adv > 0) setNum('X10', adv);          // cash handed out that has no invoice yet
+  const adv = pcRound(vNum(ctx.pending)); if(adv > 0) setNum('X10', adv);          // pending replenishment: closed statements not yet paid back, and cash handed out awaiting an invoice
   const totalCash = pcRound(grand + cashTotal + adv), unbalanced = pcRound(vNum(ctx.float) - totalCash);
   setCached('X8', grand); setCached('X9', cashTotal); setCached('X11', totalCash); setCached('AB7', grand); setCached('AB8', cashTotal);
   setFormula('AB9', 'SUM(' + vNum(ctx.float) + '-X11)', unbalanced);
@@ -3867,8 +3867,8 @@ async function buildPettyCashStatementXlsx(locId, yy){
   for(const name of Object.keys(tpl.files)){ const f = tpl.files[name]; if(!f.dir && !skip.includes(name)) out.file(name, await f.async('uint8array'), { createFolders:false }); }
   const loc = pcFund(locId), cust = pcPerson(loc && loc.pettyCashCustodianUid, loc && loc.pettyCashCustodianName), float = pcFloatOf(loc);
   let prev = null, prevTotal = 0;
-  const live = pcCountOf(locId), liveAdv = pcAdvances(locId);
-  sts.forEach((s, i) => { const rec = s.rec || {}; out.file('xl/worksheets/sheet' + (i + 1) + '.xml', pcFillStatementSheet(sheetXml, s, { loc, float:s.closed && rec.float != null ? rec.float : float, custodian:cust.name, prev, prevTotal, yellow, cash:s.closed ? rec.cash : (live ? live.counts : null), advances:s.closed ? rec.advances : liveAdv, closedDate:s.closed ? s.closedDate : '' }), { createFolders:false }); prev = s.no; prevTotal = s.total; });
+  const live = pcCountOf(locId), livePending = pcReconcile(loc).pending;
+  sts.forEach((s, i) => { const rec = s.rec || {}; out.file('xl/worksheets/sheet' + (i + 1) + '.xml', pcFillStatementSheet(sheetXml, s, { loc, float:s.closed && rec.float != null ? rec.float : float, custodian:cust.name, prev, prevTotal, yellow, cash:s.closed ? rec.cash : (live ? live.counts : null), pending:s.closed ? (rec.pendingAtClose != null ? vNum(rec.pendingAtClose) : vNum(rec.advances)) : livePending, closedDate:s.closed ? s.closedDate : '' }), { createFolders:false }); prev = s.no; prevTotal = s.total; });
   wbXml = wbXml.replace(/<sheets>[\s\S]*?<\/sheets>/, '<sheets>' + sts.map((s, i) => '<sheet name="' + xmlEsc(s.no) + '" sheetId="' + (i + 1) + '" r:id="rIdS' + (i + 1) + '"/>').join('') + '</sheets>');
   rels = rels.replace(/<Relationship [^>]*relationships\/worksheet"[^>]*\/>/g, '').replace('</Relationships>', sts.map((s, i) => '<Relationship Id="rIdS' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>').join('') + '</Relationships>');
   ct = ct.replace(/<Override PartName="\/xl\/worksheets\/sheet1\.xml"[^>]*\/>/, '').replace('</Types>', sts.map((s, i) => '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('') + '</Types>');
@@ -3900,22 +3900,25 @@ const pcCountTotal = counts => pcRound(PC_DENOMS.reduce((s, d) => s + d * Math.m
 const pcCanCount = fundId => { if(!authUser) return true; const f = pcFund(fundId); return canManageInventory() || !!(f && f.pettyCashCustodianUid && f.pettyCashCustodianUid === authUser.uid); };
 // cash handed out on a prior request whose invoice has not come in yet
 const pcAdvances = fundId => pcRound(state.pettyCash.filter(r => r.locationId === fundId && !pcInClosed(r) && r.processedDate && !pcHasInvoice(r)).reduce((s, r) => s + vNum(r.processedAmount) - vNum(r.balanceReturned), 0));
-// assigned balance = spent (invoices) + cash handed out awaiting invoice + cash at hand. Anything else is unbalanced.
+// Cash balance = cash at hand + pending replenishment, and it should equal the assigned balance less the amount used (invoices not in a closed statement yet).
+// Pending replenishment = closed statements that finance has not paid back yet + cash handed out that has no invoice yet.
+const pcStmtPending = s => (s.closed && s.rec) ? Math.max(0, pcRound(s.total - vNum(s.rec.replenishedAmount))) : 0;       // a statement from before statements could be closed (no record) counts as paid back
 function pcReconcile(f){
   const mine = state.pettyCash.filter(r => r.locationId === f.id && !pcInClosed(r)), cnt = pcCountOf(f.id);
-  const assigned = pcFloatOf(f), spent = pcRound(mine.filter(pcHasInvoice).reduce((s, r) => s + pcInvoiceTotal(r), 0)), advances = pcAdvances(f.id), cash = cnt ? pcCountTotal(cnt.counts) : 0;
-  return { assigned, spent, advances, cash, counted:!!cnt, at:cnt ? cnt.countedAt : 0, by:cnt ? cnt.countedBy : '', expected:pcRound(assigned - spent - advances), diff:pcRound(assigned - spent - advances - cash) };       // diff > 0: cash is short; diff < 0: cash is over
+  const assigned = pcFloatOf(f), spent = pcRound(mine.filter(pcHasInvoice).reduce((s, r) => s + pcInvoiceTotal(r), 0)), advances = pcAdvances(f.id);
+  const stPending = pcRound(pcStatements(f.id).reduce((s, x) => s + pcStmtPending(x), 0)), pending = pcRound(stPending + advances), cash = cnt ? pcCountTotal(cnt.counts) : 0;
+  return { assigned, spent, advances, stPending, pending, cash, counted:!!cnt, at:cnt ? cnt.countedAt : 0, by:cnt ? cnt.countedBy : '', cashBalance:pcRound(cash + pending), expected:pcRound(assigned - spent), diff:pcRound(assigned - spent - pending - cash) };       // diff > 0: cash is short; diff < 0: cash is over
 }
 const pcDiffHtml = rc => !rc.counted ? '<span class="text-slate-400 text-xs">Not counted yet</span>' : Math.abs(rc.diff) < 0.005 ? '<span class="text-emerald-600 font-semibold text-xs">Balanced ✓</span>' : vPill('crit', (rc.diff > 0 ? 'Short ' : 'Over ') + fmtMVR(Math.abs(rc.diff)));
 function pcCashHtml(){
   const rows = pcFundList().map(f => ({ f, rc:pcReconcile(f) })).filter(x => x.rc.assigned || x.rc.counted);
   if(!rows.length) return '';
-  return vPanel('Cash at hand', 'Assigned balance = spent + cash handed out awaiting invoice + cash counted', `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Location / fund' }, { t:'Assigned', n:1 }, { t:'Spent (invoices)', n:1 }, { t:'Handed out, awaiting invoice', n:1 }, { t:'Cash at hand', n:1 }, { t:'Unbalanced' }, { t:'' }])}<tbody>${rows.map(({ f, rc }) => `<tr class="${vTr}">${vTd(`<span class="inline-flex items-center gap-2"><i class="w-2.5 h-2.5 rounded-full" style="background:${esc(f.color)}"></i><span class="font-semibold">${esc(f.name)}</span></span>`, { first:1 })}${vTd(fmtMVR(rc.assigned), { n:1 })}${vTd(fmtMVR(rc.spent), { n:1 })}${vTd(fmtMVR(rc.advances), { n:1 })}${vTd(rc.counted ? `<b>${fmtMVR(rc.cash)}</b><div class="text-[11px] text-slate-400">${esc(new Date(rc.at).toLocaleDateString('en-GB', { day:'numeric', month:'short' }))} · ${esc(rc.by || '')}</div>` : '<span class="text-slate-400">—</span>', { n:1 })}${vTd(pcDiffHtml(rc))}${vTd(pcCanCount(f.id) ? `<button onclick="openPcCashCount('${esc(f.id)}')" class="text-xs font-semibold text-brand-600 hover:underline whitespace-nowrap">${rc.counted ? 'Update count' : 'Count cash'}</button>` : '', { last:1, cls:'text-right' })}</tr>`).join('')}</tbody></table></div>`);
+  return vPanel('Cash at hand', 'Cash at hand + pending replenishment = cash balance, which should equal the assigned balance less the amount used', `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Location / fund' }, { t:'Assigned', n:1 }, { t:'Amount used', n:1 }, { t:'Pending replenishment', n:1 }, { t:'Cash at hand', n:1 }, { t:'Unbalanced' }, { t:'' }])}<tbody>${rows.map(({ f, rc }) => `<tr class="${vTr}">${vTd(`<span class="inline-flex items-center gap-2"><i class="w-2.5 h-2.5 rounded-full" style="background:${esc(f.color)}"></i><span class="font-semibold">${esc(f.name)}</span></span>`, { first:1 })}${vTd(fmtMVR(rc.assigned), { n:1 })}${vTd(fmtMVR(rc.spent), { n:1 })}${vTd(fmtMVR(rc.pending), { n:1 })}${vTd(rc.counted ? `<b>${fmtMVR(rc.cash)}</b><div class="text-[11px] text-slate-400">${esc(new Date(rc.at).toLocaleDateString('en-GB', { day:'numeric', month:'short' }))} · ${esc(rc.by || '')}</div>` : '<span class="text-slate-400">—</span>', { n:1 })}${vTd(pcDiffHtml(rc))}${vTd(pcCanCount(f.id) ? `<button onclick="openPcCashCount('${esc(f.id)}')" class="text-xs font-semibold text-brand-600 hover:underline whitespace-nowrap">${rc.counted ? 'Update count' : 'Count cash'}</button>` : '', { last:1, cls:'text-right' })}</tr>`).join('')}</tbody></table></div>`);
 }
 function pcCountRecalc(){
   let total = 0; document.querySelectorAll('#pc-count-body input[data-d]').forEach(i => { const q = Math.max(0, Math.floor(vNum(i.value))), d = +i.dataset.d, t = pcRound(d * q); total += t; i.closest('tr').querySelector('.pc-ct').textContent = pcMoneyPlain(t); });
-  total = pcRound(total); const exp = +document.getElementById('pc-count-body').dataset.expected, diff = pcRound(exp - total);
-  document.getElementById('pc-count-total').textContent = fmtMVR(total);
+  total = pcRound(total); const body = document.getElementById('pc-count-body'), pending = +body.dataset.pending, exp = +body.dataset.expected, bal = pcRound(total + pending), diff = pcRound(exp - bal);
+  document.getElementById('pc-count-total').textContent = fmtMVR(total); document.getElementById('pc-count-balance').textContent = fmtMVR(bal);
   const el = document.getElementById('pc-count-diff'); el.className = 'text-sm font-bold ' + (Math.abs(diff) < 0.005 ? 'text-emerald-600' : 'text-rose-600');
   el.textContent = Math.abs(diff) < 0.005 ? 'Balanced ✓' : (diff > 0 ? 'Short ' : 'Over ') + fmtMVR(Math.abs(diff));
 }
@@ -3926,16 +3929,20 @@ function openPcCashCount(fundId){
   openModal('Cash at hand — ' + f.name, `
     <div class="text-[12.5px] text-slate-500 mb-3">Enter how many notes and coins of each kind are in the petty cash. You can update this at any time.${cnt ? `<br>Last counted ${esc(new Date(cnt.countedAt).toLocaleString())} by ${esc(cnt.countedBy || '')}.` : ''}</div>
     <table class="w-full text-sm"><thead><tr class="text-left text-[11px] uppercase tracking-wider text-slate-400"><th class="py-1.5 font-semibold">Denomination</th><th class="py-1.5 font-semibold w-32">Quantity</th><th class="py-1.5 font-semibold text-right">Total MVR</th></tr></thead>
-      <tbody id="pc-count-body" data-expected="${rc.expected}">${PC_DENOMS.map(d => `<tr class="border-t border-slate-100"><td class="py-1.5 font-semibold text-slate-700 num">${d}</td><td class="py-1.5"><input type="number" min="0" step="1" data-d="${d}" value="${esc(counts[String(d)] || '')}" oninput="pcCountRecalc()" class="${VEH_FIELD} !py-1.5"></td><td class="py-1.5 text-right num pc-ct">0.00</td></tr>`).join('')}</tbody></table>
-    <div class="border-t border-slate-200 mt-1 pt-3 grid grid-cols-2 gap-y-1.5 text-sm"><span class="text-slate-500">Cash at hand</span><span id="pc-count-total" class="text-right font-bold num">MVR 0.00</span>
-      <span class="text-slate-500">Expected (assigned − spent − handed out)</span><span class="text-right num">${fmtMVR(rc.expected)}</span><span class="text-slate-500">Unbalanced</span><span id="pc-count-diff" class="text-right"></span></div>
+      <tbody id="pc-count-body" data-expected="${rc.expected}" data-pending="${rc.pending}">${PC_DENOMS.map(d => `<tr class="border-t border-slate-100"><td class="py-1.5 font-semibold text-slate-700 num">${d}</td><td class="py-1.5"><input type="number" min="0" step="1" data-d="${d}" value="${esc(counts[String(d)] || '')}" oninput="pcCountRecalc()" class="${VEH_FIELD} !py-1.5"></td><td class="py-1.5 text-right num pc-ct">0.00</td></tr>`).join('')}</tbody></table>
+    <div class="border-t border-slate-200 mt-1 pt-3 grid grid-cols-2 gap-y-2 text-sm">
+      <span class="text-slate-500">Cash at hand</span><span id="pc-count-total" class="text-right font-bold num">MVR 0.00</span>
+      <span class="text-slate-500">Pending replenishment${rc.stPending || rc.advances ? `<span class="block text-[11px] text-slate-400">${rc.stPending ? 'Closed statements not yet replenished ' + fmtMVR(rc.stPending) : ''}${rc.stPending && rc.advances ? '<br>' : ''}${rc.advances ? 'Cash handed out, awaiting invoice ' + fmtMVR(rc.advances) : ''}</span>` : ''}</span><span class="text-right num">${fmtMVR(rc.pending)}</span>
+      <span class="text-slate-700 font-semibold">Cash balance<span class="block text-[11px] font-normal text-slate-400">cash at hand + pending replenishment</span></span><span id="pc-count-balance" class="text-right font-bold num">MVR 0.00</span>
+      <span class="text-slate-500">Expected cash balance<span class="block text-[11px] text-slate-400">assigned balance − amount used</span></span><span class="text-right num">${fmtMVR(rc.expected)}</span>
+      <span class="text-slate-500">Unbalanced</span><span id="pc-count-diff" class="text-right"></span></div>
     <div class="flex justify-end gap-2.5 mt-5"><button type="button" class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50" onclick="closeModal()">Cancel</button><button type="button" id="pc-count-save" class="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700" onclick="savePcCashCount('${esc(fundId)}')">Save count</button></div>`, true);
   pcCountRecalc();
 }
 async function savePcCashCount(fundId){
   const f = pcFund(fundId); if(!f || !pcCanCount(fundId)) return;
   const counts = {}; document.querySelectorAll('#pc-count-body input[data-d]').forEach(i => { const q = Math.max(0, Math.floor(vNum(i.value))); if(q) counts[i.dataset.d] = q; });
-  const total = pcCountTotal(counts), prev = pcCountOf(fundId), rc = pcReconcile(f), diff = pcRound(rc.expected - total), at = Date.now();
+  const total = pcCountTotal(counts), prev = pcCountOf(fundId), rc = pcReconcile(f), diff = pcRound(rc.expected - rc.pending - total), at = Date.now();
   document.getElementById('pc-count-save').disabled = true;
   await vehSave('pettyCounts', { id:fundId, counts, total, countedAt:at, countedBy:authUser ? authUser.name : '', countedByUid:authUser ? authUser.uid : '', log:((prev && prev.log) || []).concat([{ at, by:authUser ? authUser.name : '', total, diff }]).slice(-10) });
   closeModal();
@@ -3983,9 +3990,9 @@ function pcCloseStatement(no){
   const s = pcStatements(locId).find(x => x.no === no); if(!s || s.closed) return;
   const rc = pcReconcile(pcFund(locId)), unproc = s.list.filter(r => !r.processedDate).length;
   const warn = [unproc ? unproc + ' of its vouchers ' + (unproc === 1 ? 'is' : 'are') + ' not processed yet' : '', !rc.counted ? 'the cash has not been counted' : (Math.abs(rc.diff) >= 0.005 ? 'the cash does not balance (' + (rc.diff > 0 ? 'short ' : 'over ') + fmtMVR(Math.abs(rc.diff)) + ')' : '')].filter(Boolean);
-  confirmAction('Close statement ' + no + '? It has ' + s.list.length + ' voucher' + (s.list.length === 1 ? '' : 's') + ' totalling ' + fmtMVR(s.total) + (warn.length ? ', and ' + warn.join(', and ') : '') + '. Once closed its vouchers cannot be changed, and new requests go into a new statement.', async () => {
+  confirmAction('Close statement ' + no + '? It has ' + s.list.length + ' voucher' + (s.list.length === 1 ? '' : 's') + ' totalling ' + fmtMVR(s.total) + (warn.length ? ', and ' + warn.join(', and ') : '') + '. Once closed its vouchers cannot be changed, new requests go into a new statement, and its total counts as pending replenishment until you mark it replenished.', async () => {
     const cnt = pcCountOf(locId), today = vToday();
-    await vehSave('pettyStatements', { id:s.rec ? s.rec.id : undefined, no, locationId:locId, status:'closed', openedDate:(s.rec && s.rec.openedDate) || today, openedAt:s.at || Date.now(), closedDate:today, closedAt:Date.now(), closedBy:authUser ? authUser.name : '', cash:cnt ? cnt.counts : null, cashTotal:cnt ? pcCountTotal(cnt.counts) : 0, advances:rc.advances, float:rc.assigned, diffAtClose:rc.counted ? rc.diff : null });
+    await vehSave('pettyStatements', { id:s.rec ? s.rec.id : undefined, no, locationId:locId, status:'closed', openedDate:(s.rec && s.rec.openedDate) || today, openedAt:s.at || Date.now(), closedDate:today, closedAt:Date.now(), closedBy:authUser ? authUser.name : '', cash:cnt ? cnt.counts : null, cashTotal:cnt ? pcCountTotal(cnt.counts) : 0, advances:rc.advances, pendingAtClose:rc.pending, float:rc.assigned, diffAtClose:rc.counted ? rc.diff : null, replenishedAmount:0, replenishedDate:null, replenishNote:null });
     vehUi.stSelLoc = ''; vehUi.stNo = ''; rerenderMain();
     if(await pcDownloadStatements(locId, s.yy)) toast('Statement ' + no + ' closed and downloaded. New requests go into a new statement.'); else toast('Statement ' + no + ' closed, but the file could not be built. Use Download below.', true);
   });
@@ -3996,7 +4003,7 @@ function pcReopenStatement(no){
   if(!s || !s.closed) return;
   if(open){ toast('Statement ' + open.no + ' is open. Close it first, because only one statement can be open.', true); return; }
   confirmAction('Reopen statement ' + no + '? Its vouchers can be changed again, and its cash figures follow the current count until you close it again.', async () => {
-    if(s.rec) await vehSave('pettyStatements', { id:s.rec.id, status:'open', closedDate:null, closedAt:null, closedBy:null, cash:null, cashTotal:null, advances:null, float:null, diffAtClose:null });
+    if(s.rec) await vehSave('pettyStatements', { id:s.rec.id, status:'open', closedDate:null, closedAt:null, closedBy:null, cash:null, cashTotal:null, advances:null, pendingAtClose:null, float:null, diffAtClose:null, replenishedAmount:null, replenishedDate:null, replenishNote:null });
     else await vehSave('pettyStatements', { no, locationId:locId, status:'open', openedDate:(s.list[0] && s.list[0].statementDate) || vToday(), openedAt:s.at || Date.now(), openedBy:authUser ? authUser.name : '' });
     vehUi.stSelLoc = ''; rerenderMain(); toast('Statement reopened.');
   });
@@ -4015,11 +4022,60 @@ function pcReleaseStatement(no){                                               /
     await vehDelete('pettyStatements', rec.id); vehUi.stSelLoc = ''; rerenderMain(); toast('Statement released.');
   });
 }
+function openPcRenameStatement(no){
+  const locId = pcStLocation(); if(!pcCanStatement(locId)){ toast('Only ' + pcStatementWho(locId) + ' can change a statement number.', true); return; }
+  openModal('Edit statement number', vFormOpen + `
+    <p class="text-sm text-slate-500 mb-4">The statement number is also the name of its Excel sheet. The vouchers in the statement are renumbered with it.</p>
+    <label class="${VEH_LBL}">Statement number${vReqStar}</label><input type="text" name="newNo" maxlength="31" value="${esc(no)}" autocomplete="off" class="${VEH_FIELD}">
+    ${vFoot('Save', `savePcRenameStatement('${esc(no)}')`)}`, true);
+  const el = document.querySelector('#vform input[name=newNo]'); if(el){ el.focus(); el.select(); }
+}
+async function savePcRenameStatement(oldNo){
+  const locId = pcStLocation(); if(!pcCanStatement(locId)) return;
+  const o = vehFormObj(document.getElementById('vform')), no = String(o.newNo || '').trim();
+  if(no === oldNo){ closeModal(); return; }
+  const problem = pcStatementNoProblem(no, oldNo); if(problem) return vFail(problem);
+  const s = pcStatements(locId).find(x => x.no === oldNo); if(!s){ closeModal(); return; }
+  const btn = document.getElementById('vf-save'); if(btn) btn.disabled = true;
+  for(const r of state.pettyCash.filter(x => x.statementNo === oldNo)) await vehSave('pettyCash', { id:r.id, statementNo:no });
+  if(s.rec) await vehSave('pettyStatements', { id:s.rec.id, no });
+  vehUi.stSelLoc = ''; closeModal(); rerenderMain(); toast('Statement renamed to ' + no + '.');
+}
+function pcReplCell(s){
+  if(!s.rec) return '<span class="text-slate-300">—</span>';
+  const pend = pcStmtPending(s), got = vNum(s.rec.replenishedAmount);
+  return pend > 0 ? vPill('warn', 'Pending ' + fmtMVR(pend)) + (got ? `<div class="text-[11px] text-slate-400 mt-0.5">${fmtMVR(got)} received</div>` : '') : vPill('good', 'Replenished' + (s.rec.replenishedDate ? ' ' + vDate(s.rec.replenishedDate) : ''));
+}
+function openPcReplenish(no){
+  const locId = pcStLocation(); if(!pcCanStatement(locId)){ toast('Only ' + pcStatementWho(locId) + ' can record a replenishment.', true); return; }
+  const s = pcStatements(locId).find(x => x.no === no); if(!s || !s.closed || !s.rec) return;
+  const pend = pcStmtPending(s);
+  openModal('Mark statement replenished', vFormOpen + `
+    <p class="text-sm text-slate-500 mb-4"><b class="text-slate-800">${esc(no)}</b> · total ${fmtMVR(s.total)}${vNum(s.rec.replenishedAmount) ? ' · ' + fmtMVR(s.rec.replenishedAmount) + ' already received' : ''}<br>Still pending replenishment: <b class="text-slate-800">${fmtMVR(pend)}</b></p>
+    ${vGrid(2, vF('Date received', 'replenishedDate', vToday(), 'date', { req:1 }) + vF('Amount received (MVR)', 'amount', pend, 'number', { req:1 }) + vTa('Note', 'replenishNote', s.rec.replenishNote, { span:'sm:col-span-2', rows:2, ph:'For example: bank transfer reference' }))}
+    ${vFoot('Mark replenished', `savePcReplenish('${esc(no)}')`)}`, true);
+}
+async function savePcReplenish(no){
+  const locId = pcStLocation(); if(!pcCanStatement(locId)) return;
+  const s = pcStatements(locId).find(x => x.no === no); if(!s || !s.rec) return;
+  const o = vehFormObj(document.getElementById('vform')), amt = vNum(o.amount), pend = pcStmtPending(s);
+  if(!o.replenishedDate) return vFail('Enter the date.');
+  if(!(amt > 0)) return vFail('Enter the amount received.');
+  if(amt > pend + 0.005) return vFail('That is more than is pending (' + fmtMVR(pend) + ').');
+  const btn = document.getElementById('vf-save'); if(btn) btn.disabled = true;
+  await vehSave('pettyStatements', { id:s.rec.id, replenishedAmount:pcRound(vNum(s.rec.replenishedAmount) + amt), replenishedDate:o.replenishedDate, replenishNote:o.replenishNote || '', replenishedBy:authUser ? authUser.name : '' });
+  closeModal(); rerenderMain(); toast(Math.abs(amt - pend) < 0.005 ? 'Statement marked replenished.' : 'Replenishment recorded. ' + fmtMVR(pcRound(pend - amt)) + ' is still pending.');
+}
+function pcUndoReplenish(no){
+  const locId = pcStLocation(); if(!pcCanStatement(locId)){ toast('Only ' + pcStatementWho(locId) + ' can change this.', true); return; }
+  const s = pcStatements(locId).find(x => x.no === no); if(!s || !s.rec) return;
+  confirmAction('Clear the replenishment recorded for ' + no + '? Its full total (' + fmtMVR(s.total) + ') goes back to pending replenishment.', async () => { await vehSave('pettyStatements', { id:s.rec.id, replenishedAmount:0, replenishedDate:null, replenishNote:null, replenishedBy:null }); rerenderMain(); toast('Replenishment cleared.'); });
+}
 function pcCashBoxHtml(loc){
   const rc = pcReconcile(loc), bad = rc.counted && Math.abs(rc.diff) >= 0.005, cell = (l, v, strong) => `<div><div class="text-[11px] text-slate-400">${l}</div><div class="text-sm ${strong ? 'font-bold text-slate-900' : 'text-slate-700'} num">${v}</div></div>`;
   return vPanel('Cash at hand', pcCanCount(loc.id) ? `<button onclick="openPcCashCount('${esc(loc.id)}')" class="text-xs font-semibold text-brand-600 hover:underline">${rc.counted ? 'Update count' : 'Count cash'}</button>` : '', `
-    <div class="px-5 sm:px-6 py-4 grid grid-cols-2 sm:grid-cols-5 gap-4 items-center ${bad ? 'border-l-4 border-rose-500' : ''}">${cell('Assigned', fmtMVR(rc.assigned))}${cell('Spent (invoices)', fmtMVR(rc.spent))}${cell('Handed out, awaiting invoice', fmtMVR(rc.advances))}${cell('Cash at hand', rc.counted ? fmtMVR(rc.cash) : '—', 1)}<div><div class="text-[11px] text-slate-400">Unbalanced</div><div class="mt-0.5">${pcDiffHtml(rc)}</div></div></div>
-    ${rc.counted ? `<div class="px-5 sm:px-6 pb-3 text-[11.5px] text-slate-400">Counted ${esc(new Date(rc.at).toLocaleString())}${rc.by ? ' by ' + esc(rc.by) : ''}. The statement workbook uses this count${bad ? ', and highlights the unbalanced amount' : ''}.</div>` : '<div class="px-5 sm:px-6 pb-3 text-[11.5px] text-slate-400">No count yet. Enter the notes and coins to check the cash against the statement.</div>'}`);
+    <div class="px-5 sm:px-6 py-4 grid grid-cols-2 sm:grid-cols-5 gap-4 items-center ${bad ? 'border-l-4 border-rose-500' : ''}">${cell('Assigned', fmtMVR(rc.assigned))}${cell('Amount used', fmtMVR(rc.spent))}${cell('Pending replenishment', fmtMVR(rc.pending))}${cell('Cash at hand', rc.counted ? fmtMVR(rc.cash) : '—', 1)}<div><div class="text-[11px] text-slate-400">Unbalanced</div><div class="mt-0.5">${pcDiffHtml(rc)}</div></div></div>
+    <div class="px-5 sm:px-6 pb-3 text-[11.5px] text-slate-400">Cash at hand + pending replenishment = cash balance${rc.counted ? ' (' + fmtMVR(rc.cashBalance) + ')' : ''}, which should equal the assigned balance less the amount used (${fmtMVR(rc.expected)}).${rc.stPending ? ' Pending replenishment includes ' + fmtMVR(rc.stPending) + ' on closed statements not yet replenished.' : ''}${rc.counted ? ` Counted ${esc(new Date(rc.at).toLocaleString())}${rc.by ? ' by ' + esc(rc.by) : ''}.` : ' No count yet.'}</div>`);
 }
 function viewPcStatementsExcel(){
   const locId = pcStLocation(), loc = pcFund(locId), yy = vToday().slice(2, 4);
@@ -4044,7 +4100,7 @@ function viewPcStatementsExcel(){
     ${kpis}
     ${vPanel('Open statement', open ? `<span class="text-xs text-slate-400">Vouchers are added as their invoices come in</span>` : '', open ? `
       <div class="px-5 sm:px-6 py-4 flex items-start justify-between gap-3 flex-wrap">
-        <div><div class="text-base font-bold text-slate-900 num">${esc(open.no)}</div><div class="text-xs text-slate-500 mt-0.5">${open.list.length} of ${PC_STATEMENT_ROWS} vouchers · ${fmtMVR(open.total)}${open.from ? ' · invoices ' + vDate(open.from) + (open.to !== open.from ? ' – ' + vDate(open.to) : '') : ''}</div>${unprocOpen ? `<div class="text-xs text-amber-700 mt-1">${unprocOpen} voucher${unprocOpen === 1 ? ' is' : 's are'} not processed yet</div>` : ''}</div>
+        <div><div class="flex items-center gap-2.5"><div class="text-base font-bold text-slate-900 num">${esc(open.no)}</div>${can ? `<button onclick="openPcRenameStatement('${esc(open.no)}')" class="text-xs text-slate-400 hover:text-brand-600 hover:underline" title="Edit the statement number">Edit number</button>` : ''}</div><div class="text-xs text-slate-500 mt-0.5">${open.list.length} of ${PC_STATEMENT_ROWS} vouchers · ${fmtMVR(open.total)}${open.from ? ' · invoices ' + vDate(open.from) + (open.to !== open.from ? ' – ' + vDate(open.to) : '') : ''}</div>${unprocOpen ? `<div class="text-xs text-amber-700 mt-1">${unprocOpen} voucher${unprocOpen === 1 ? ' is' : 's are'} not processed yet</div>` : ''}</div>
         <div class="flex items-center gap-2 flex-wrap"><button onclick="pcDownloadStatements('${esc(locId)}', '${open.yy}', this)" class="${VEH_BTN} border border-slate-300 text-slate-700 hover:bg-slate-50">Download workbook</button>${can ? `<button onclick="pcCloseStatement('${esc(open.no)}')" class="${VEH_BTN} bg-brand-600 text-white hover:bg-brand-700">Close statement</button><button onclick="pcReleaseStatement('${esc(open.no)}')" class="text-xs text-slate-400 hover:text-rose-600 hover:underline">Release</button>` : ''}</div></div>
       ${open.list.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Voucher' }, { t:'Supplier' }, { t:'Bill no.' }, { t:'Details' }, { t:'Category' }, { t:'Processed' }, { t:'Amount', n:1 }, { t:'' }])}<tbody>${openRows}</tbody></table></div>` : vEmpty('No vouchers in this statement yet. Add them from the list below.')}`
       : vEmpty(can ? 'No statement is open. Pick vouchers below, give the statement a number and start it. New requests then go into it.' : 'No statement is open.'))}
@@ -4054,7 +4110,7 @@ function viewPcStatementsExcel(){
         <div class="px-5 sm:px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">${footer}</div>`
       : `${vEmpty('No vouchers are ready. A voucher joins a statement once it has an invoice.')}${!elig.length && !open && can ? `<div class="px-5 sm:px-6 pb-4 flex justify-end items-end gap-3 flex-wrap"><label class="text-xs font-semibold text-slate-600">Statement number<input id="pc-st-no" type="text" maxlength="31" value="${esc(vehUi.stNo || pcNextStatementNo(locId, yy))}" oninput="vehUi.stNo = this.value" class="${VEH_INPUT} block mt-1 w-64"></label>${vBtnPrimary('Start empty statement', 'pcGenerateStatement(this)')}</div>` : ''}`)}
     ${need.length ? vPanel('Waiting for an invoice', 'Add the invoice on the voucher to include it', `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Voucher' }, { t:'Purpose' }, { t:'Type' }, { t:'Requested', n:1 }, { t:'' }])}<tbody>${need.map(r => `<tr class="${vTr}">${vTd(`<span class="font-semibold">${esc(r.number)}</span><div class="text-[11.5px] text-slate-400">${vDate(r.date)}</div>`, { first:1 })}${vTd(esc(r.purpose || '—'))}${vTd(vPill(r.option === 'Reimbursement' ? 'warn' : 'acc', esc(r.option)))}${vTd(fmtMVR(pcTotal(r)), { n:1 })}${vTd(pcCanEdit(r) ? `<button onclick="openPcForm('${r.id}')" class="text-xs font-semibold text-brand-600 hover:underline">Add invoice</button>` : '', { last:1, cls:'text-right' })}</tr>`).join('')}</tbody></table></div>`) : ''}
-    ${vPanel('Closed statements', 'Their vouchers are locked. The workbook has one sheet per statement, for the year', closed.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Statement' }, { t:'Vouchers', n:1 }, { t:'Invoice dates' }, { t:'Total', n:1 }, { t:'Closed' }, { t:'' }])}<tbody>${closed.map(s => `<tr class="${vTr}">${vTd(`<span class="font-semibold">${esc(s.no)}</span>`, { first:1 })}${vTd(String(s.list.length), { n:1 })}${vTd(s.from ? vDate(s.from) + (s.to !== s.from ? ' – ' + vDate(s.to) : '') : '—')}${vTd(`<b>${fmtMVR(s.total)}</b>`, { n:1 })}${vTd(s.closedDate ? vDate(s.closedDate) : '—')}${vTd(`<button onclick="pcDownloadStatements('${esc(locId)}', '${s.yy}', this)" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Download workbook</button>${can ? `<button onclick="pcReopenStatement('${esc(s.no)}')" class="text-xs font-semibold text-slate-500 hover:text-brand-600 hover:underline">Reopen</button>` : ''}`, { last:1, cls:'text-right whitespace-nowrap' })}</tr>`).join('')}</tbody></table></div>` : vEmpty('No closed statements yet.'))}`;
+    ${vPanel('Closed statements', 'Their vouchers are locked. The workbook has one sheet per statement, for the year', closed.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">${vTHead([{ t:'Statement' }, { t:'Vouchers', n:1 }, { t:'Invoice dates' }, { t:'Total', n:1 }, { t:'Closed' }, { t:'Replenishment' }, { t:'' }])}<tbody>${closed.map(s => `<tr class="${vTr}">${vTd(`<span class="font-semibold">${esc(s.no)}</span>`, { first:1 })}${vTd(String(s.list.length), { n:1 })}${vTd(s.from ? vDate(s.from) + (s.to !== s.from ? ' – ' + vDate(s.to) : '') : '—')}${vTd(`<b>${fmtMVR(s.total)}</b>`, { n:1 })}${vTd(s.closedDate ? vDate(s.closedDate) : '—')}${vTd(pcReplCell(s))}${vTd(`<button onclick="pcDownloadStatements('${esc(locId)}', '${s.yy}', this)" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Download workbook</button>${can && s.rec && pcStmtPending(s) > 0 ? `<button onclick="openPcReplenish('${esc(s.no)}')" class="text-xs font-semibold text-brand-600 hover:underline mr-3">Mark replenished</button>` : ''}${can && s.rec && vNum(s.rec.replenishedAmount) > 0 ? `<button onclick="pcUndoReplenish('${esc(s.no)}')" class="text-xs text-slate-400 hover:text-rose-600 hover:underline mr-3">Undo</button>` : ''}${can ? `<button onclick="openPcRenameStatement('${esc(s.no)}')" class="text-xs text-slate-400 hover:text-brand-600 hover:underline mr-3">Rename</button>` : ''}${can ? `<button onclick="pcReopenStatement('${esc(s.no)}')" class="text-xs font-semibold text-slate-500 hover:text-brand-600 hover:underline">Reopen</button>` : ''}`, { last:1, cls:'text-right whitespace-nowrap' })}</tr>`).join('')}</tbody></table></div>` : vEmpty('No closed statements yet.'))}`;
 }
 function viewPettyCashStatement(){
   const tabs = `<div class="mb-5">${vTabs([['excel', 'Statements (Excel)'], ['summary', 'Summary report']], vehUi.stTab || 'excel', 'pcStTab')}</div>`;
